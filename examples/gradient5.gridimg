@@ -1,0 +1,11 @@
+# Horizontal gradient with 5 gray shades (no chroma)
+# Tests luma-only variation with neutral chroma
+A=16,128,128
+B=70,128,128
+C=128,128,128
+D=185,128,128
+E=235,128,128
+
+ABCDE
+ABCDE
+ABCDE

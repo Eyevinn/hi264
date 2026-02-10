@@ -1,0 +1,15 @@
+# Japanese flag approximation (Hinomaru)
+# 2:3 ratio = 8x12 MBs (128x192 pixels)
+# White background, red center circle approximated as rectangle
+@rgb
+W=255,255,255
+R=188,0,45
+
+WWWWWWWWWWWW
+WWWWWWWWWWWW
+WWWWWRRWWWWW
+WWWWRRRRWWWW
+WWWWRRRRWWWW
+WWWWWRRWWWWW
+WWWWWWWWWWWW
+WWWWWWWWWWWW

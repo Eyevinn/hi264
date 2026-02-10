@@ -1,0 +1,11 @@
+# Dark saturated colors - tests extreme chroma values
+# Colors specified as YCbCr directly (limited range)
+A=30,40,220
+B=30,220,40
+C=30,220,220
+D=30,40,40
+
+AABB
+CCDD
+AABB
+CCDD

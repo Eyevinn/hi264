@@ -1,0 +1,10 @@
+# 4x4 checkerboard with saturated colors
+# Tests prediction across many color boundaries
+@rgb
+R=255,0,0
+C=0,255,255
+
+RCRC
+CRCR
+RCRC
+CRCR

@@ -1,0 +1,20 @@
+# Swedish flag (Sveriges flagga)
+# Proportions: 5:8 (height:width) = 10x16 macroblocks = 160x256 pixels
+# Cross position: 5:2:9 horizontally, 4:2:4 vertically
+@rgb
+
+# Blue: NCS 4055-R95B (official)
+B=0,106,167
+# Yellow: NCS 0580-Y10R (official)
+Y=254,204,0
+
+BBBBBYYBBBBBBBBB
+BBBBBYYBBBBBBBBB
+BBBBBYYBBBBBBBBB
+BBBBBYYBBBBBBBBB
+YYYYYYYYYYYYYYYY
+YYYYYYYYYYYYYYYY
+BBBBBYYBBBBBBBBB
+BBBBBYYBBBBBBBBB
+BBBBBYYBBBBBBBBB
+BBBBBYYBBBBBBBBB

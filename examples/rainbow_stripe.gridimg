@@ -1,0 +1,11 @@
+# Vertical rainbow stripes (6 colors, 6x2 grid)
+@rgb
+R=255,0,0
+O=255,165,0
+Y=255,255,0
+G=0,128,0
+B=0,0,255
+P=128,0,128
+
+ROYGBP
+ROYGBP

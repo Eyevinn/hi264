@@ -1,0 +1,28 @@
+external/
+references/
+
+# Testdata: only track .264 and specific .mp4 test files
+testdata/*.yuv
+testdata/*.mp4
+!testdata/progressive_32x32.mp4
+testdata/golden/*.yuv
+
+# Build output
+out/
+*.test
+
+# Coverage
+/coverage.*
+
+# Dependencies
+vendor/
+
+# IDE
+.vscode/
+
+# Python virtual environments
+venv/
+.venv/
+
+# Compiled binaries
+cmd/hi264gen/hi264gen

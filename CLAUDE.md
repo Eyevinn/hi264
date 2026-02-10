@@ -1,0 +1,217 @@
+# H.264/AVC Frame Decoder & Bitstream Generator in Pure Go
+
+## Project Status
+
+Pure Go H.264/AVC decoder for IDR and P_Skip frames with CABAC and CAVLC entropy
+coding, plus a bitstream generator that produces valid H.264 test content from
+flat-color 16x16 macroblock grid patterns (I_16x16 DC prediction). Not a
+general-purpose encoder. Supports both CAVLC (Baseline) and CABAC (Main profile),
+with P_Skip frame generation for efficient multi-frame sequences.
+Pixel-perfect match with FFmpeg across 41 golden decoder test cases and 12+
+encoder verification tests.
+
+### Implemented Features
+
+#### Decoder
+- CABAC arithmetic engine + context model initialization
+- CAVLC (Exp-Golomb + VLC tables) entropy decoding
+- Macroblock layer parsing (I_4x4, I_8x8, I_16x16, P_Skip)
+- Inverse quantization and transform (4x4, 8x8, DC Hadamard)
+- Custom scaling matrices (SPS/PPS with Table 7-2 fall-back)
+- Intra prediction (all 4x4, 8x8, 16x16, and chroma modes)
+- Frame reconstruction + deblocking filter
+- P_Skip frame decoding (copy from reference, CAVLC and CABAC)
+- Multi-frame decoding via `DecodeAllFrames` (IDR + P_Skip sequences)
+- Y4M, PNG, and JPEG output support
+
+#### Encoder (hi264gen)
+- CAVLC I_16x16 IDR frame encoder with DC prediction (Baseline profile)
+- CABAC I_16x16 IDR frame encoder with DC prediction (Main profile)
+- CABAC arithmetic encoder engine (inverse of decoder)
+- CABAC syntax element encoding (mb_type, chroma pred, qp_delta, residual)
+- Per-sub-block chroma DC prediction (matching decoder's 4x4 sub-block logic)
+- Forward Hadamard transform + quantization (QP 0-51)
+- SPS/PPS generation (Baseline and Main profiles, configurable max_num_ref_frames)
+- Grid-based pattern input with RGB or YCbCr color specification
+- FFmpeg-verified output across diverse test patterns (CAVLC and CABAC)
+- P_Skip slice encoder (CAVLC and CABAC, all-skip MBs copying from reference)
+- P-slice header writer (non-IDR, with ref list and marking syntax, CABAC alignment)
+- Efficient multi-frame sequences: IDR at configurable intervals, P_Skip between
+- ~76% bitstream size reduction vs all-IDR for repeated frames
+- Fragmented MP4 (fMP4/CMAF) output with configurable framerate and fragment duration
+- Tiling background pattern from `.gridimg` files (`-f` with `-w`/`-h`)
+- Auto-scaling digits (`-digit-scale 0`) to fill available frame space
+- Digit background box (`-digit-bg R,G,B`) for readability over busy patterns
+- Built-in 75% SMPTE color bars pattern (`-smpte`)
+- Filler NAL padding (`-bpp`) for fixed bytes-per-picture / CBR-like streams
+
+#### Raw Output (hi264gen)
+- Raw YUV/Y4M/PNG/JPEG output from the same grid patterns (no H.264 encoding)
+- BT.601 limited-range RGB-to-YCbCr conversion (and reverse for PNG output)
+- `.gridimg` file format with `@rgb` directive for self-describing color space
+
+### Dependencies
+- `github.com/Eyevinn/mp4ff` — SPS/PPS/SliceHeader parsing, NAL extraction, fragmented MP4 creation
+
+### Key Reference Files
+- FFmpeg: `external/ffmpeg/libavcodec/h264_cabac.c`, `h264_cavlc.c`
+- Standard: `references/ISO_IEC_DIS_14496-10_Ed11.pdf`
+
+## Build & Test
+
+```bash
+go build ./...
+go test ./...
+```
+
+### CLI tools
+
+```bash
+# Decode H.264 (auto-detects .264 vs .mp4/.m4v input)
+go run ./cmd/hi264dec input.264 output.yuv      # raw YUV (auto-adds _WxH_yuv420p suffix)
+go run ./cmd/hi264dec input.264 output.png      # PNG (auto-detected from extension)
+go run ./cmd/hi264dec input.264 output.jpg      # JPEG (-q for quality, default 85)
+go run ./cmd/hi264dec input.264 output.y4m      # Y4M
+
+# Decode IDR frames from MP4 container
+go run ./cmd/hi264dec input.mp4 output.png
+go run ./cmd/hi264dec -n 5 input.mp4 frames.png # extract 5 IDR frames (frames_0000.png, ...)
+
+# Generate H.264 IDR frame from grid pattern (CAVLC, Baseline profile)
+go run ./cmd/hi264gen -f examples/sweden.gridimg -o sweden.264
+
+# Generate H.264 IDR frame with CABAC entropy coding (Main profile)
+go run ./cmd/hi264gen -f examples/sweden.gridimg -cabac -o sweden_cabac.264
+
+# Generate H.264 IDR frame from inline grid/colors
+go run ./cmd/hi264gen -grid "xy,yx" -c x=235,128,128 -c y=16,128,128 -o checker.264
+
+# Generate multi-frame H.264 sequence with frame counter
+go run ./cmd/hi264gen -w 176 -h 80 -n 10 -digits 3 -o counter.264
+
+# Generate sequence with P_Skip frames (IDR every 50 frames, P_Skip between, CAVLC)
+go run ./cmd/hi264gen -w 1280 -h 720 -n 121 -digits 3 -idr-interval 50 -o counter.264
+
+# With CABAC P_Skip frames (Main profile)
+go run ./cmd/hi264gen -w 1280 -h 720 -n 121 -digits 3 -cabac -idr-interval 50 -o counter.264
+
+# Generate fragmented MP4 (25 fps, fragment every 25 frames)
+go run ./cmd/hi264gen -w 176 -h 80 -n 50 -digits 3 -o counter.mp4
+
+# Generate MP4 with custom framerate and fragment duration
+go run ./cmd/hi264gen -w 320 -h 240 -n 75 -digits 3 -fps 30 -frag-dur 30 -o counter.mp4
+
+# Generate sequence with tiled background pattern
+go run ./cmd/hi264gen -f examples/checker4x4.gridimg -w 176 -h 80 -n 10 -digits 3 -o counter.264
+
+# SMPTE color bars with counter overlay
+go run ./cmd/hi264gen -smpte -w 176 -h 80 -n 10 -digits 3 -o smpte.264
+
+# SMPTE bars with digit background box and explicit scale
+go run ./cmd/hi264gen -smpte -w 352 -h 288 -n 1 -digits 2 -digit-scale 3 -digit-bg 0,0,0 -o smpte_big.264
+
+# Fixed bytes per picture (pad with filler NALUs for CBR-like streams)
+go run ./cmd/hi264gen -smpte -w 176 -h 80 -bpp 5000 -o padded.264
+go run ./cmd/hi264gen -w 320 -h 240 -n 50 -digits 3 -bpp 8000 -o cbr_counter.mp4
+
+# Generate reference image from grid pattern (raw, no H.264 encoding)
+go run ./cmd/hi264gen -f examples/sweden.gridimg -o expected.png
+
+# Generate tiled pattern with custom dimensions
+go run ./cmd/hi264gen -f examples/checker4x4.gridimg -w 176 -h 80 -o tiled.png
+
+# Generate multi-frame with counter
+go run ./cmd/hi264gen -f examples/checker4x4.gridimg -w 176 -h 80 -n 5 -digits 3 -o counter.png
+
+# SMPTE bars reference image
+go run ./cmd/hi264gen -smpte -w 176 -h 80 -o smpte.png
+
+# Raw YUV output
+go run ./cmd/hi264gen -f examples/sweden.gridimg -o sweden.yuv
+
+# JPEG output
+go run ./cmd/hi264gen -f examples/sweden.gridimg -q 95 -o sweden.jpg
+```
+
+### Golden test regeneration
+
+Golden tests verify byte-exact match with FFmpeg. To regenerate:
+
+```bash
+# Run all verification tests (requires ffmpeg with libx264)
+bash tools/gen_and_verify.sh
+
+# Regenerate golden bitstreams and print updated checksums
+bash tools/update_golden.sh
+# Then paste the printed Go map into pkg/decoder/decoder_test.go
+```
+
+Never add a golden bitstream unless hi264dec output is identical to FFmpeg decode.
+
+### Encoder verification
+
+```bash
+# Verify hi264gen grid-only output matches FFmpeg decode across all test patterns
+bash tools/verify_hi264gen.sh
+```
+
+### Debugging
+
+```bash
+# Decode without deblocking (isolates per-MB errors)
+go run ./cmd/hi264dec -no-deblock input.264 output.yuv
+
+# Decode multiple frames
+go run ./cmd/hi264dec -n 10 input.264 output.y4m
+
+# Emit MBCMP comparison lines for FFmpeg cross-check
+TRACE_MBCMP=1 go run ./cmd/hi264dec input.264 output.yuv
+```
+
+## Architecture
+
+```
+pkg/decoder/       — Public: top-level decoder API (DecodeAnnexB, DecodeAVC, etc.)
+pkg/encode/        — Public: encoder API (EncodeParams, GenerateSPS/PPS/IDR/PSkip)
+pkg/frame/         — Public: Frame type (decoded output)
+pkg/yuv/           — Public: Grid, ColorMap, Color (encode input), YUV/Y4M/PNG output
+internal/cabac/    — Internal: CABAC arithmetic decoder and encoder engines
+internal/cavlc/    — Internal: CAVLC bitstream reader, VLC tables, residual decoder
+internal/context/  — Internal: Context model initialization (1024 contexts)
+internal/slice/    — Internal: Slice data parsing, MB type decoding, residual decoding
+internal/transform/— Internal: Inverse quantization and transform (4x4, 8x8, DC)
+internal/pred/     — Internal: Intra prediction modes (4x4, 8x8, 16x16, chroma)
+cmd/hi264dec/      — CLI: decode H.264 from raw .264 or MP4 containers
+cmd/hi264gen/      — CLI: generate H.264 test bitstreams or raw images from grid patterns
+examples/          — Example grid image files (.gridimg)
+tools/             — Test generation and verification scripts
+testdata/          — Golden H.264 bitstreams for regression testing
+```
+
+## Library Usage
+
+External projects can use the decoder and encoder packages directly:
+
+```go
+import (
+    "github.com/Eyevinn/hi264/pkg/decoder"
+    "github.com/Eyevinn/hi264/pkg/encode"
+    "github.com/Eyevinn/hi264/pkg/yuv"
+)
+
+// Decode an Annex-B byte stream
+dec := decoder.New()
+frame, err := dec.DecodeAnnexB(annexBData)
+
+// Decode AVC-format data (4-byte length-prefixed NALUs)
+frame, err = dec.DecodeAVC(avcData)
+
+// Decode multi-frame stream
+frames, err := dec.DecodeAllAnnexB(annexBData)
+
+// Generate an IDR frame
+p := encode.EncodeParams{Width: 320, Height: 240, QP: 26}
+sps, _ := encode.GenerateSPS(p)
+pps, _ := encode.GeneratePPS(p)
+idr, _ := encode.GenerateIDR(p, grid, colors, 0)
+```

@@ -1,0 +1,13 @@
+# French flag (tricolore)
+# 2:3 aspect ratio = 6x9 MBs (96x144 pixels)
+@rgb
+B=0,35,149
+W=255,255,255
+R=237,41,57
+
+BBBWWWRRR
+BBBWWWRRR
+BBBWWWRRR
+BBBWWWRRR
+BBBWWWRRR
+BBBWWWRRR
