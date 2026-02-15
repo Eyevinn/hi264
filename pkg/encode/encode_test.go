@@ -4,9 +4,9 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/Eyevinn/mp4ff/avc"
 	"github.com/Eyevinn/hi264/pkg/decoder"
 	"github.com/Eyevinn/hi264/pkg/yuv"
+	"github.com/Eyevinn/mp4ff/avc"
 )
 
 func TestEncodeDecode1x1(t *testing.T) {
@@ -459,8 +459,8 @@ func TestEncodePSkipCAVLC(t *testing.T) {
 
 // TestSPSMaxRefFrames verifies SPS with maxRef=0 is unchanged, maxRef=1 differs.
 func TestSPSMaxRefFrames(t *testing.T) {
-	sps0 := EncodeSPS(32, 32, 0)
-	sps1 := EncodeSPS(32, 32, 1)
+	sps0 := EncodeSPS(32, 32, 0, 0, 0)
+	sps1 := EncodeSPS(32, 32, 1, 0, 0)
 
 	if bytes.Equal(sps0, sps1) {
 		t.Error("SPS with maxRef=0 and maxRef=1 should differ")

@@ -41,10 +41,11 @@ Options:
 `
 
 type options struct {
-	version   bool
-	noDeblock bool
-	n         int
-	jpegQual  int
+	version    bool
+	noDeblock  bool
+	n          int
+	jpegQual   int
+	colorspace string
 }
 
 func parseOptions(fs *flag.FlagSet, args []string) (*options, error) {
@@ -53,6 +54,7 @@ func parseOptions(fs *flag.FlagSet, args []string) (*options, error) {
 	fs.BoolVar(&opts.noDeblock, "no-deblock", false, "skip deblocking filter")
 	fs.IntVar(&opts.n, "n", 1, "max frames to decode")
 	fs.IntVar(&opts.jpegQual, "q", 85, "JPEG quality (1-100)")
+	fs.StringVar(&opts.colorspace, "colorspace", "", "override color space (bt601, bt709, bt2020)")
 	fs.Usage = func() {
 		fmt.Fprintf(os.Stderr, usg, appName, appName)
 		fs.PrintDefaults()
@@ -111,7 +113,22 @@ func run(args []string) error {
 	}
 
 	if outputFile != "" {
-		return writeFrames(frames, outputFile, opts)
+		// Determine color space: CLI override > frame VUI > default BT.601
+		cs := yuv.BT601
+		var rng yuv.Range
+		if opts.colorspace != "" {
+			var cerr error
+			cs, cerr = yuv.ParseColorSpace(opts.colorspace)
+			if cerr != nil {
+				return cerr
+			}
+		} else if len(frames) > 0 && frames[0].ColorDescriptionValid {
+			cs = yuv.ColorSpaceFromMatrixCoefficients(frames[0].MatrixCoefficients)
+		}
+		if len(frames) > 0 && frames[0].VideoFullRangeFlag {
+			rng = yuv.FullRange
+		}
+		return writeFrames(frames, outputFile, opts, cs, rng)
 	}
 	return nil
 }
@@ -323,31 +340,31 @@ func decodeSample(sampleData []byte, spsNALUs, ppsNALUs [][]byte, dec *decoder.D
 	return dec.DecodeNALUs(nalus)
 }
 
-func writeFrames(frames []*frame.Frame, outputFile string, opts *options) error {
+func writeFrames(frames []*frame.Frame, outputFile string, opts *options, cs yuv.ColorSpace, rng yuv.Range) error {
 	ext := strings.ToLower(filepath.Ext(outputFile))
 
 	switch ext {
 	case ".y4m":
-		return writeY4M(frames, outputFile)
+		return writeY4M(frames, outputFile, cs, rng)
 	case ".yuv":
 		return writeYUV(frames, outputFile)
 	case ".png":
-		return writeImages(frames, outputFile, opts)
+		return writeImages(frames, outputFile, opts, cs, rng)
 	case ".jpg", ".jpeg":
-		return writeImages(frames, outputFile, opts)
+		return writeImages(frames, outputFile, opts, cs, rng)
 	default:
 		return fmt.Errorf("unsupported output format: %s", ext)
 	}
 }
 
-func writeY4M(frames []*frame.Frame, outputFile string) error {
+func writeY4M(frames []*frame.Frame, outputFile string, cs yuv.ColorSpace, rng yuv.Range) error {
 	of, err := os.Create(outputFile)
 	if err != nil {
 		return fmt.Errorf("create output: %w", err)
 	}
 	defer of.Close()
 
-	if err := yuv.WriteY4MHeader(of, frames[0].Width, frames[0].Height); err != nil {
+	if err := yuv.WriteY4MHeaderCS(of, frames[0].Width, frames[0].Height, cs, rng); err != nil {
 		return fmt.Errorf("write Y4M header: %w", err)
 	}
 	for _, f := range frames {
@@ -376,7 +393,7 @@ func writeYUV(frames []*frame.Frame, outputFile string) error {
 	return nil
 }
 
-func writeImages(frames []*frame.Frame, outputFile string, opts *options) error {
+func writeImages(frames []*frame.Frame, outputFile string, opts *options, cs yuv.ColorSpace, rng yuv.Range) error {
 	ext := strings.ToLower(filepath.Ext(outputFile))
 	isJPEG := ext == ".jpg" || ext == ".jpeg"
 
@@ -392,9 +409,9 @@ func writeImages(frames []*frame.Frame, outputFile string, opts *options) error 
 		}
 
 		if isJPEG {
-			err = yuv.WriteJPEG(of, f, opts.jpegQual)
+			err = yuv.WriteJPEGCS(of, f, opts.jpegQual, cs, rng)
 		} else {
-			err = yuv.WritePNG(of, f)
+			err = yuv.WritePNGCS(of, f, cs, rng)
 		}
 		of.Close()
 		if err != nil {

@@ -1,5 +1,9 @@
 # H.264/AVC Frame Decoder & Bitstream Generator in Pure Go
 
+## Conventions
+
+- Never add "Co-Authored-By: Claude" to commit messages or pull request messages
+
 ## Project Status
 
 Pure Go H.264/AVC decoder for IDR and P_Skip frames with CABAC and CAVLC entropy
@@ -7,6 +11,7 @@ coding, plus a bitstream generator that produces valid H.264 test content from
 flat-color 16x16 macroblock grid patterns (I_16x16 DC prediction). Not a
 general-purpose encoder. Supports both CAVLC (Baseline) and CABAC (Main profile),
 with P_Skip frame generation for efficient multi-frame sequences.
+All processing is 8-bit 4:2:0 only (no 10-bit or 4:2:2/4:4:4 support).
 Pixel-perfect match with FFmpeg across 41 golden decoder test cases and 12+
 encoder verification tests.
 
@@ -45,10 +50,18 @@ encoder verification tests.
 - Built-in 75% SMPTE color bars pattern (`-smpte`)
 - Filler NAL padding (`-bpp`) for fixed bytes-per-picture / CBR-like streams
 
+#### Color Space Support
+- BT.601 (SD, default), BT.709 (HD), BT.2020 (UHD) color spaces
+- Limited-range (Y: 16-235) and full-range (Y: 0-255) YCbCr conversion
+- H.264 SPS VUI parameters signaling (colour_primaries, transfer_characteristics, matrix_coefficients, video_full_range_flag)
+- Decoder extracts VUI color metadata from SPS for correct YCbCr→RGB conversion
+- `.gridimg` directives: `@bt709`, `@bt2020`, `@bt601` for per-file color space
+- Y4M output with XCOLORSPACE/XCOLORRANGE tags
+
 #### Raw Output (hi264gen)
 - Raw YUV/Y4M/PNG/JPEG output from the same grid patterns (no H.264 encoding)
-- BT.601 limited-range RGB-to-YCbCr conversion (and reverse for PNG output)
-- `.gridimg` file format with `@rgb` directive for self-describing color space
+- Configurable color space for RGB↔YCbCr conversion (BT.601/BT.709/BT.2020)
+- `.gridimg` file format with `@rgb` and `@bt709`/`@bt2020` directives
 
 ### Dependencies
 - `github.com/Eyevinn/mp4ff` — SPS/PPS/SliceHeader parsing, NAL extraction, fragmented MP4 creation
@@ -131,6 +144,15 @@ go run ./cmd/hi264gen -f examples/sweden.gridimg -o sweden.yuv
 
 # JPEG output
 go run ./cmd/hi264gen -f examples/sweden.gridimg -q 95 -o sweden.jpg
+
+# Color space: generate BT.709 stream with VUI signaling
+go run ./cmd/hi264gen -f examples/sweden.gridimg -colorspace bt709 -o sweden_709.264
+
+# Full-range BT.709
+go run ./cmd/hi264gen -smpte -w 320 -h 240 -colorspace bt709 -full-range -o smpte_709.264
+
+# Decode with color space override (when VUI is absent)
+go run ./cmd/hi264dec -colorspace bt709 input.264 output.png
 ```
 
 ### Golden test regeneration

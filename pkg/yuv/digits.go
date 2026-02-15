@@ -193,21 +193,25 @@ func TileBackground(grid *Grid, colors ColorMap, pattern *Grid, patternColors Co
 	return &Grid{Chars: chars, Width: grid.Width, Height: grid.Height}, merged, nil
 }
 
-// SMPTEBarsGrid returns a grid with 7 SMPTE 75% color bars distributed
+// SMPTEBarsGrid returns a grid with 7 SMPTE 75% color bars using BT.601 limited range.
+func SMPTEBarsGrid(mbCols int) (*Grid, ColorMap) {
+	return SMPTEBarsGridCS(mbCols, BT601, LimitedRange)
+}
+
+// SMPTEBarsGridCS returns a grid with 7 SMPTE 75% color bars distributed
 // evenly across mbCols macroblocks. Each bar gets mbCols/7 columns,
 // with the remainder distributed one extra column to the first bars.
 // Colors are: White, Yellow, Cyan, Green, Magenta, Red, Blue.
-// Values are BT.601 limited-range YCbCr converted from 75% RGB.
-func SMPTEBarsGrid(mbCols int) (*Grid, ColorMap) {
+func SMPTEBarsGridCS(mbCols int, cs ColorSpace, rng Range) (*Grid, ColorMap) {
 	barChars := []byte{'W', 'Y', 'C', 'G', 'M', 'R', 'B'}
 	colors := ColorMap{
-		'W': RGBToYCbCr(191, 191, 191),
-		'Y': RGBToYCbCr(191, 191, 0),
-		'C': RGBToYCbCr(0, 191, 191),
-		'G': RGBToYCbCr(0, 191, 0),
-		'M': RGBToYCbCr(191, 0, 191),
-		'R': RGBToYCbCr(191, 0, 0),
-		'B': RGBToYCbCr(0, 0, 191),
+		'W': RGBToYCbCrCS(191, 191, 191, cs, rng),
+		'Y': RGBToYCbCrCS(191, 191, 0, cs, rng),
+		'C': RGBToYCbCrCS(0, 191, 191, cs, rng),
+		'G': RGBToYCbCrCS(0, 191, 0, cs, rng),
+		'M': RGBToYCbCrCS(191, 0, 191, cs, rng),
+		'R': RGBToYCbCrCS(191, 0, 0, cs, rng),
+		'B': RGBToYCbCrCS(0, 0, 191, cs, rng),
 	}
 	if mbCols < 7 {
 		mbCols = 7

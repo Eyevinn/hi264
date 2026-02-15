@@ -461,6 +461,16 @@ func (d *Decoder) decodeIDR(nalu []byte) (*frame.Frame, error) {
 
 	// Reconstruct frame
 	f := frame.NewFrame(width, height)
+
+	// Extract color space metadata from VUI if present
+	if sps.VUI != nil {
+		if sps.VUI.ColourDescriptionFlag {
+			f.ColorDescriptionValid = true
+			f.MatrixCoefficients = sps.VUI.MatrixCoefficients
+		}
+		f.VideoFullRangeFlag = sps.VUI.VideoFullRangeFlag
+	}
+
 	err = reconstructFrame(sc, f, sps, pps)
 	if err != nil {
 		return nil, fmt.Errorf("reconstruct frame: %w", err)

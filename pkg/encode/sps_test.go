@@ -4,6 +4,8 @@ import (
 	"testing"
 
 	"github.com/Eyevinn/mp4ff/avc"
+
+	"github.com/Eyevinn/hi264/pkg/yuv"
 )
 
 func TestSPSRoundTrip(t *testing.T) {
@@ -22,7 +24,7 @@ func TestSPSRoundTrip(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			rbsp := EncodeSPS(tt.width, tt.height, 0)
+			rbsp := EncodeSPS(tt.width, tt.height, 0, 0, 0)
 
 			// Construct NALU: NAL header + RBSP
 			nalHeader := byte(0x67) // nal_ref_idc=3, type=7 (SPS)
@@ -70,9 +72,9 @@ func TestSPSCropping(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			var rbsp []byte
 			if tt.profile == 77 {
-				rbsp = EncodeSPSMain(tt.width, tt.height, 0)
+				rbsp = EncodeSPSMain(tt.width, tt.height, 0, 0, 0)
 			} else {
-				rbsp = EncodeSPS(tt.width, tt.height, 0)
+				rbsp = EncodeSPS(tt.width, tt.height, 0, 0, 0)
 			}
 
 			nalHeader := byte(0x67)
@@ -99,6 +101,68 @@ func TestSPSCropping(t *testing.T) {
 			}
 			if sps.Height != uint(tt.height) {
 				t.Errorf("Height = %d, want %d", sps.Height, tt.height)
+			}
+		})
+	}
+}
+
+func TestSPSVUIColorSpace(t *testing.T) {
+	tests := []struct {
+		name       string
+		cs         yuv.ColorSpace
+		rng        yuv.Range
+		profile    int
+		wantVUI    bool
+		wantPri    uint
+		wantMatrix uint
+		wantFull   bool
+	}{
+		{"Baseline BT601 limited (no VUI)", yuv.BT601, yuv.LimitedRange, 66, false, 0, 0, false},
+		{"Baseline BT709 limited", yuv.BT709, yuv.LimitedRange, 66, true, 1, 1, false},
+		{"Baseline BT2020 limited", yuv.BT2020, yuv.LimitedRange, 66, true, 9, 9, false},
+		{"Baseline BT601 full", yuv.BT601, yuv.FullRange, 66, true, 5, 5, true},
+		{"Main BT709 limited", yuv.BT709, yuv.LimitedRange, 77, true, 1, 1, false},
+		{"Main BT2020 full", yuv.BT2020, yuv.FullRange, 77, true, 9, 9, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var rbsp []byte
+			if tt.profile == 77 {
+				rbsp = EncodeSPSMain(320, 240, 0, tt.cs, tt.rng)
+			} else {
+				rbsp = EncodeSPS(320, 240, 0, tt.cs, tt.rng)
+			}
+
+			nalHeader := byte(0x67)
+			nalu := append([]byte{nalHeader}, rbsp...)
+
+			sps, err := avc.ParseSPSNALUnit(nalu, true)
+			if err != nil {
+				t.Fatalf("ParseSPSNALUnit: %v", err)
+			}
+
+			if !tt.wantVUI {
+				if sps.VUI != nil && sps.VUI.VideoSignalTypePresentFlag {
+					t.Error("expected no VUI video signal type for BT601 limited")
+				}
+				return
+			}
+
+			if sps.VUI == nil {
+				t.Fatal("expected VUI parameters to be present")
+			}
+			if !sps.VUI.ColourDescriptionFlag {
+				t.Fatal("expected colour_description_present_flag to be set")
+			}
+			if sps.VUI.ColourPrimaries != tt.wantPri {
+				t.Errorf("colour_primaries = %d, want %d", sps.VUI.ColourPrimaries, tt.wantPri)
+			}
+			if sps.VUI.MatrixCoefficients != tt.wantMatrix {
+				t.Errorf("matrix_coefficients = %d, want %d", sps.VUI.MatrixCoefficients, tt.wantMatrix)
+			}
+			if sps.VUI.VideoFullRangeFlag != tt.wantFull {
+				t.Errorf("video_full_range_flag = %v, want %v", sps.VUI.VideoFullRangeFlag, tt.wantFull)
 			}
 		})
 	}

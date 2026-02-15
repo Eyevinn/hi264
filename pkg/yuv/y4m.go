@@ -9,7 +9,19 @@ import (
 
 // WriteY4MHeader writes the YUV4MPEG2 file header to w.
 func WriteY4MHeader(w io.Writer, width, height int) error {
-	header := fmt.Sprintf("YUV4MPEG2 W%d H%d F1:1 Ip A1:1 C420mpeg2\n", width, height)
+	return WriteY4MHeaderCS(w, width, height, BT601, LimitedRange)
+}
+
+// WriteY4MHeaderCS writes the YUV4MPEG2 file header with color space metadata.
+func WriteY4MHeaderCS(w io.Writer, width, height int, cs ColorSpace, rng Range) error {
+	header := fmt.Sprintf("YUV4MPEG2 W%d H%d F1:1 Ip A1:1 C420mpeg2", width, height)
+	if cs != BT601 || rng != LimitedRange {
+		header += fmt.Sprintf(" XCOLORSPACE=%s", cs)
+		if rng == FullRange {
+			header += " XCOLORRANGE=FULL"
+		}
+	}
+	header += "\n"
 	_, err := io.WriteString(w, header)
 	if err != nil {
 		return fmt.Errorf("write Y4M header: %w", err)

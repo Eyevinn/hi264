@@ -36,3 +36,34 @@ func TestWriteY4M(t *testing.T) {
 		t.Errorf("YUV data size = %d, want %d", len(data)-headerEnd, yuvSize)
 	}
 }
+
+func TestWriteY4MHeaderCSColorSpaceTags(t *testing.T) {
+	tests := []struct {
+		name      string
+		cs        ColorSpace
+		rng       Range
+		wantTag   string
+		wantNoTag string
+	}{
+		{"bt601 limited (default, no tags)", BT601, LimitedRange, "", "XCOLORSPACE"},
+		{"bt709 limited", BT709, LimitedRange, "XCOLORSPACE=bt709", ""},
+		{"bt2020 limited", BT2020, LimitedRange, "XCOLORSPACE=bt2020", ""},
+		{"bt601 full", BT601, FullRange, "XCOLORRANGE=FULL", ""},
+		{"bt709 full", BT709, FullRange, "XCOLORSPACE=bt709", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			if err := WriteY4MHeaderCS(&buf, 16, 16, tt.cs, tt.rng); err != nil {
+				t.Fatal(err)
+			}
+			header := buf.String()
+			if tt.wantTag != "" && !strings.Contains(header, tt.wantTag) {
+				t.Errorf("header %q missing tag %q", header, tt.wantTag)
+			}
+			if tt.wantNoTag != "" && strings.Contains(header, tt.wantNoTag) {
+				t.Errorf("header %q should not contain %q", header, tt.wantNoTag)
+			}
+		})
+	}
+}

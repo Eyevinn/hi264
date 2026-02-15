@@ -75,8 +75,15 @@ func ParseGrid(input string) (*Grid, error) {
 }
 
 // ParseColorSpec parses a color spec string like "x=128,128,128".
-// If isRGB is true, the values are treated as RGB and converted to YCbCr.
+// If isRGB is true, the values are treated as RGB and converted to YCbCr using BT.601.
 func ParseColorSpec(s string, isRGB bool) (byte, Color, error) {
+	return ParseColorSpecCS(s, isRGB, BT601, LimitedRange)
+}
+
+// ParseColorSpecCS parses a color spec string like "x=128,128,128".
+// If isRGB is true, the values are treated as RGB and converted to YCbCr
+// using the specified color space and range.
+func ParseColorSpecCS(s string, isRGB bool, cs ColorSpace, rng Range) (byte, Color, error) {
 	parts := strings.SplitN(s, "=", 2)
 	if len(parts) != 2 {
 		return 0, Color{}, fmt.Errorf("invalid color spec %q: expected char=v1,v2,v3", s)
@@ -104,7 +111,7 @@ func ParseColorSpec(s string, isRGB bool) (byte, Color, error) {
 	}
 
 	if isRGB {
-		c := RGBToYCbCr(uint8(v[0]), uint8(v[1]), uint8(v[2]))
+		c := RGBToYCbCrCS(uint8(v[0]), uint8(v[1]), uint8(v[2]), cs, rng)
 		return ch, c, nil
 	}
 
@@ -113,15 +120,7 @@ func ParseColorSpec(s string, isRGB bool) (byte, Color, error) {
 
 // RGBToYCbCr converts RGB to YCbCr using BT.601 limited range.
 func RGBToYCbCr(r, g, b uint8) Color {
-	ri, gi, bi := int(r), int(g), int(b)
-	y := ((66*ri + 129*gi + 25*bi + 128) >> 8) + 16
-	cb := ((-38*ri - 74*gi + 112*bi + 128) >> 8) + 128
-	cr := ((112*ri - 94*gi - 18*bi + 128) >> 8) + 128
-	return Color{
-		Y:  clipU8(y),
-		Cb: clipU8(cb),
-		Cr: clipU8(cr),
-	}
+	return RGBToYCbCrCS(r, g, b, BT601, LimitedRange)
 }
 
 func clipU8(v int) uint8 {

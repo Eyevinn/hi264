@@ -11,12 +11,14 @@ import (
 
 // EncodeParams holds H.264 encoding parameters.
 type EncodeParams struct {
-	Width          int  // frame width in pixels (must be even)
-	Height         int  // frame height in pixels (must be even)
-	QP             int  // quantization parameter (0-51, default 26)
-	CABAC          bool // true=Main profile CABAC, false=Baseline CAVLC
-	DisableDeblock int  // 0=enable, 1=disable
-	MaxRefFrames   int  // max_num_ref_frames (0=IDR-only, 1+=P-frames)
+	Width          int            // frame width in pixels (must be even)
+	Height         int            // frame height in pixels (must be even)
+	QP             int            // quantization parameter (0-51, default 26)
+	CABAC          bool           // true=Main profile CABAC, false=Baseline CAVLC
+	DisableDeblock int            // 0=enable, 1=disable
+	MaxRefFrames   int            // max_num_ref_frames (0=IDR-only, 1+=P-frames)
+	ColorSpace     yuv.ColorSpace // YCbCr matrix standard (default BT601)
+	Range          yuv.Range      // sample value range (default LimitedRange)
 }
 
 func (p *EncodeParams) validate() error {
@@ -46,9 +48,9 @@ func GenerateSPS(p EncodeParams) ([]byte, error) {
 	}
 	var rbsp []byte
 	if p.CABAC {
-		rbsp = EncodeSPSMain(p.Width, p.Height, p.MaxRefFrames)
+		rbsp = EncodeSPSMain(p.Width, p.Height, p.MaxRefFrames, p.ColorSpace, p.Range)
 	} else {
-		rbsp = EncodeSPS(p.Width, p.Height, p.MaxRefFrames)
+		rbsp = EncodeSPS(p.Width, p.Height, p.MaxRefFrames, p.ColorSpace, p.Range)
 	}
 	var buf bytes.Buffer
 	if err := WriteNALU(&buf, 7, 3, rbsp); err != nil {
@@ -90,6 +92,8 @@ func GenerateIDR(p EncodeParams, grid *yuv.Grid, colors yuv.ColorMap, idrPicID u
 		MaxNumRefFrames: p.MaxRefFrames,
 		Width:           p.Width,
 		Height:          p.Height,
+		ColorSpace:      p.ColorSpace,
+		Range:           p.Range,
 	}
 	return enc.EncodeSlice(idrPicID)
 }

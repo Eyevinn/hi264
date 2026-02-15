@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Flexible color space support: BT.601 (default), BT.709, and BT.2020
+- Full-range and limited-range YCbCr conversion
+- H.264 SPS VUI parameters (colour_primaries, transfer_characteristics, matrix_coefficients, video_full_range_flag) written when non-default color space is used
+- `-colorspace` flag for hi264gen and hi264dec (`bt601`, `bt709`, `bt2020`)
+- `-full-range` flag for hi264gen and hi264dec
+- `.gridimg` directives: `@bt709`, `@bt2020`, `@bt601` for per-file color space control
+- Y4M output includes `XCOLORSPACE` and `XCOLORRANGE` tags when non-default
+- Decoder extracts VUI color metadata from SPS and uses it for YCbCr→RGB conversion
+- `pkg/yuv.ColorSpace` type with `RGBToYCbCrCS()` and `YCbCrToRGBCS()` parameterized conversions
+- `pkg/yuv.ParseColorSpace()`, `ColorSpaceFromMatrixCoefficients()` helpers
+
 ## [0.8.0] - 2025-02-15
 
 Initial public release of hi264 — a pure Go H.264/AVC frame decoder and
