@@ -19,9 +19,10 @@ jobs:
           go-version: "1.25"
 
       - name: Generate coverage
-        run: go test -coverprofile=profile.cov ./...
+        run: go test -coverpkg=./... -coverprofile=profile.cov ./...
 
       - name: Upload coverage
         uses: shogo82148/actions-goveralls@v1
         with:
           path-to-profile: profile.cov
+          github-token: ${{ secrets.GITHUB_TOKEN }}
