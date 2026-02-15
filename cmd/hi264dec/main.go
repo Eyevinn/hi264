@@ -12,6 +12,7 @@ import (
 	"github.com/Eyevinn/mp4ff/avc"
 	"github.com/Eyevinn/mp4ff/mp4"
 
+	"github.com/Eyevinn/hi264/internal"
 	"github.com/Eyevinn/hi264/pkg/decoder"
 	"github.com/Eyevinn/hi264/pkg/frame"
 	"github.com/Eyevinn/hi264/pkg/yuv"
@@ -40,6 +41,7 @@ Options:
 `
 
 type options struct {
+	version   bool
 	noDeblock bool
 	n         int
 	jpegQual  int
@@ -47,6 +49,7 @@ type options struct {
 
 func parseOptions(fs *flag.FlagSet, args []string) (*options, error) {
 	var opts options
+	fs.BoolVar(&opts.version, "version", false, "Get hi264 version")
 	fs.BoolVar(&opts.noDeblock, "no-deblock", false, "skip deblocking filter")
 	fs.IntVar(&opts.n, "n", 1, "max frames to decode")
 	fs.IntVar(&opts.jpegQual, "q", 85, "JPEG quality (1-100)")
@@ -73,6 +76,11 @@ func run(args []string) error {
 			return nil
 		}
 		return err
+	}
+
+	if opts.version {
+		fmt.Printf("%s %s\n", appName, internal.GetVersion())
+		return nil
 	}
 
 	if fs.NArg() < 1 {

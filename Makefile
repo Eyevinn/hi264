@@ -1,14 +1,17 @@
 .PHONY: all build test coverage check pre-commit codespell clean install
 
+LDFLAGS = -X github.com/Eyevinn/hi264/internal.commitVersion=$$(git describe --tags HEAD 2>/dev/null || echo dev-$$(git rev-parse --short HEAD)) \
+          -X github.com/Eyevinn/hi264/internal.commitDate=$$(git log -1 --format=%ct)
+
 all: check build test
 
 build: out/hi264dec out/hi264gen
 
-out/hi264dec: $(shell find pkg cmd/hi264dec -name '*.go')
-	go build -o $@ ./cmd/hi264dec
+out/hi264dec: $(shell find pkg cmd/hi264dec internal -name '*.go')
+	go build -ldflags "$(LDFLAGS)" -o $@ ./cmd/hi264dec
 
-out/hi264gen: $(shell find pkg cmd/hi264gen -name '*.go')
-	go build -o $@ ./cmd/hi264gen
+out/hi264gen: $(shell find pkg cmd/hi264gen internal -name '*.go')
+	go build -ldflags "$(LDFLAGS)" -o $@ ./cmd/hi264gen
 
 test:
 	go test ./...
@@ -40,5 +43,5 @@ clean:
 	rm -rf out/ coverage.out coverage.html coverage.txt venv/
 
 install:
-	go install ./cmd/hi264dec
-	go install ./cmd/hi264gen
+	go install -ldflags "$(LDFLAGS)" ./cmd/hi264dec
+	go install -ldflags "$(LDFLAGS)" ./cmd/hi264gen

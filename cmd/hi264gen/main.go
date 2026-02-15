@@ -29,6 +29,7 @@ import (
 
 	"github.com/Eyevinn/mp4ff/avc"
 	"github.com/Eyevinn/mp4ff/mp4"
+	"github.com/Eyevinn/hi264/internal"
 	"github.com/Eyevinn/hi264/pkg/encode"
 	"github.com/Eyevinn/hi264/pkg/yuv"
 )
@@ -64,6 +65,7 @@ func (c *colorFlags) Set(s string) error {
 }
 
 type options struct {
+	version     bool
 	grid        string
 	colors      colorFlags
 	imgFile     string
@@ -90,6 +92,7 @@ type options struct {
 
 func parseOptions(fs *flag.FlagSet, args []string) (*options, error) {
 	var opts options
+	fs.BoolVar(&opts.version, "version", false, "Get hi264 version")
 	fs.StringVar(&opts.grid, "grid", "", "grid pattern (rows separated by commas)")
 	fs.Var(&opts.colors, "c", "color spec: char=v1,v2,v3 (repeatable)")
 	fs.StringVar(&opts.imgFile, "f", "", "image file (.gridimg, alternative to -grid/-c)")
@@ -154,6 +157,11 @@ func run(args []string) error {
 			return nil
 		}
 		return err
+	}
+
+	if opts.version {
+		fmt.Printf("%s %s\n", appName, internal.GetVersion())
+		return nil
 	}
 
 	if opts.output == "" {
