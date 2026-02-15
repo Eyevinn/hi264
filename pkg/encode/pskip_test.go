@@ -4,9 +4,9 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/Eyevinn/mp4ff/avc"
 	"github.com/Eyevinn/hi264/pkg/decoder"
 	"github.com/Eyevinn/hi264/pkg/yuv"
+	"github.com/Eyevinn/mp4ff/avc"
 )
 
 // TestEncodePSkipSliceRoundTrip generates SPS/PPS, parses them back, encodes
@@ -42,7 +42,7 @@ func TestEncodePSkipSliceRoundTrip(t *testing.T) {
 	buf.Write(idrSlice)
 
 	// Parse SPS/PPS back from generated bitstream
-	spsRBSP := EncodeSPS(32, 32, 1)
+	spsRBSP := EncodeSPS(32, 32, 1, 0, 0)
 	spsNalu := append([]byte{0x67}, spsRBSP...)
 	sps, err := avc.ParseSPSNALUnit(spsNalu, true)
 	if err != nil {
@@ -290,7 +290,7 @@ func TestEncodePSkipSliceCABACRoundTrip(t *testing.T) {
 	buf.Write(idrSlice)
 
 	// Parse SPS/PPS back for standalone EncodePSkipSlice
-	spsRBSP := EncodeSPSMain(32, 32, 1)
+	spsRBSP := EncodeSPSMain(32, 32, 1, 0, 0)
 	spsNalu := append([]byte{0x67}, spsRBSP...)
 	sps, err := avc.ParseSPSNALUnit(spsNalu, true)
 	if err != nil {

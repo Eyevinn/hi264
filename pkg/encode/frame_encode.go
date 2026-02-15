@@ -16,11 +16,13 @@ type FrameEncoder struct {
 	Grid            *yuv.Grid
 	Colors          yuv.ColorMap
 	QP              int
-	DisableDeblock  int  // 0=enable, 1=disable
-	CABAC           bool // use CABAC entropy coding (Main profile) instead of CAVLC (Baseline)
-	MaxNumRefFrames int  // max_num_ref_frames in SPS (0 for IDR-only, 1+ for P-frames)
-	Width           int  // actual pixel width for SPS (0 = Grid.Width*16)
-	Height          int  // actual pixel height for SPS (0 = Grid.Height*16)
+	DisableDeblock  int            // 0=enable, 1=disable
+	CABAC           bool           // use CABAC entropy coding (Main profile) instead of CAVLC (Baseline)
+	MaxNumRefFrames int            // max_num_ref_frames in SPS (0 for IDR-only, 1+ for P-frames)
+	Width           int            // actual pixel width for SPS (0 = Grid.Width*16)
+	Height          int            // actual pixel height for SPS (0 = Grid.Height*16)
+	ColorSpace      yuv.ColorSpace // YCbCr matrix standard (default BT601)
+	Range           yuv.Range      // sample value range (default LimitedRange)
 }
 
 // Encode produces an Annex-B bitstream containing SPS, PPS, and one IDR slice.
@@ -49,7 +51,7 @@ func (e *FrameEncoder) EncodeSPSPPS(buf *bytes.Buffer) error {
 	}
 
 	if e.CABAC {
-		spsRBSP := EncodeSPSMain(width, height, e.MaxNumRefFrames)
+		spsRBSP := EncodeSPSMain(width, height, e.MaxNumRefFrames, e.ColorSpace, e.Range)
 		if err := WriteNALU(buf, 7, 3, spsRBSP); err != nil {
 			return fmt.Errorf("write SPS: %w", err)
 		}
@@ -58,7 +60,7 @@ func (e *FrameEncoder) EncodeSPSPPS(buf *bytes.Buffer) error {
 			return fmt.Errorf("write PPS: %w", err)
 		}
 	} else {
-		spsRBSP := EncodeSPS(width, height, e.MaxNumRefFrames)
+		spsRBSP := EncodeSPS(width, height, e.MaxNumRefFrames, e.ColorSpace, e.Range)
 		if err := WriteNALU(buf, 7, 3, spsRBSP); err != nil {
 			return fmt.Errorf("write SPS: %w", err)
 		}

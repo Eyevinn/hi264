@@ -19,6 +19,8 @@ prediction frames where each macroblock is a single flat color, defined by a
 grid pattern. This is useful for generating test bitstreams, color bars, frame
 counters, and reference content for decoder verification.
 
+All processing is 8-bit 4:2:0 only (no 10-bit or 4:2:2/4:4:4 support).
+
 Pixel-perfect match with FFmpeg IDR decoding across 41+ golden test cases covering varied
 content, profiles, QP ranges, scaling matrices, deblocking, resolutions, and
 both entropy coding modes.
@@ -52,6 +54,7 @@ go run ./cmd/hi264dec -n 3 input.mp4 output.y4m        # 3 frames in single Y4M 
 # Options
 go run ./cmd/hi264dec -no-deblock input.264 output.yuv # skip deblocking filter
 go run ./cmd/hi264dec -q 95 input.264 output.jpg       # JPEG quality (default 85)
+go run ./cmd/hi264dec -colorspace bt709 input.264 output.png  # override color space
 go run ./cmd/hi264dec input.264                        # decode only, print info
 ```
 
@@ -113,11 +116,20 @@ go run ./cmd/hi264gen -w 176 -h 80 -n 5 -digits 3 -o output.y4m
 go run ./cmd/hi264gen -w 176 -h 80 -n 5 -digits 3 -o frame_%03d.png
 ```
 
+```bash
+# Color space: generate BT.709 stream (VUI signaled in SPS)
+go run ./cmd/hi264gen -f examples/sweden.gridimg -colorspace bt709 -o sweden_709.264
+
+# Full-range BT.709
+go run ./cmd/hi264gen -smpte -w 320 -h 240 -colorspace bt709 -full-range -o smpte_709.264
+```
+
 Flags: `-f` (image file), `-grid`, `-c` (repeatable), `-rgb`, `-smpte` (SMPTE color bars),
 `-w` (width), `-h` (height), `-n` (frame count, default 1), `-digits` (counter digits, default 0),
 `-digit-scale` (0=auto), `-digit-bg` (R,G,B for digit box),
 `-fg` (R,G,B), `-bg` (R,G,B), `-qp` (0-51), `-cabac`, `-no-deblock`, `-q` (JPEG quality),
 `-idr-interval` (0=all-IDR), `-bpp` (bytes per picture),
+`-colorspace` (`bt601`/`bt709`/`bt2020`, default `bt601`), `-full-range`,
 `-fps` (MP4 framerate, default 25), `-frag-dur` (MP4 fragment duration in frames, default 25), `-o`
 
 ### Constant bitrate testing with `-bpp`
@@ -157,6 +169,7 @@ The `.gridimg` format combines color definitions and a grid layout in one file:
 ```
 # Comments start with #
 @rgb
+@bt709
 # Colors: char=v1,v2,v3 (YCbCr by default, RGB with @rgb directive or -rgb flag)
 B=0,106,167
 Y=254,204,0
@@ -169,8 +182,9 @@ BBBBBYYBBBBBBBBB
 BBBBBYYBBBBBBBBB
 ```
 
-Each character in the grid maps to one 16x16 macroblock. See `examples/` for
-complete examples.
+Each character in the grid maps to one 16x16 macroblock. Supported directives:
+`@rgb` (treat values as RGB), `@bt601`/`@bt709`/`@bt2020` (color space for
+RGB-to-YCbCr conversion). See `examples/` for complete examples.
 
 ## Example Patterns
 

@@ -14,7 +14,7 @@ func TestPPSRoundTrip(t *testing.T) {
 	nalu := append([]byte{nalHeader}, rbsp...)
 
 	// Need SPS for parsing PPS
-	spsRBSP := EncodeSPS(32, 32, 0)
+	spsRBSP := EncodeSPS(32, 32, 0, 0, 0)
 	spsNalu := append([]byte{0x67}, spsRBSP...)
 	sps, err := avc.ParseSPSNALUnit(spsNalu, true)
 	if err != nil {

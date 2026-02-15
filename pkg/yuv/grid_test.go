@@ -139,3 +139,96 @@ yx
 		t.Errorf("color x Y=%d, want 235", colors['x'].Y)
 	}
 }
+
+func TestParseImageFileCSDirectives(t *testing.T) {
+	tests := []struct {
+		name   string
+		input  string
+		wantCS ColorSpace
+	}{
+		{"bt709 directive", "@rgb\n@bt709\nw=255,255,255\n\nw\n", BT709},
+		{"bt2020 directive", "@rgb\n@bt2020\nw=255,255,255\n\nw\n", BT2020},
+		{"bt601 directive", "@rgb\n@bt601\nw=255,255,255\n\nw\n", BT601},
+		{"bt.709 directive", "@rgb\n@bt.709\nw=255,255,255\n\nw\n", BT709},
+		{"default is bt601", "@rgb\nw=255,255,255\n\nw\n", BT601},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, _, cs, err := ParseImageFileCS(strings.NewReader(tt.input), false, BT601, LimitedRange)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if cs != tt.wantCS {
+				t.Errorf("color space = %v, want %v", cs, tt.wantCS)
+			}
+		})
+	}
+}
+
+func TestParseImageFileCSUnknownDirective(t *testing.T) {
+	input := "@unknown\nw=255,255,255\n\nw\n"
+	_, _, _, err := ParseImageFileCS(strings.NewReader(input), false, BT601, LimitedRange)
+	if err == nil {
+		t.Error("expected error for unknown directive")
+	}
+}
+
+func TestParseImageFileCSNoGrid(t *testing.T) {
+	input := "x=235,128,128\n"
+	_, _, _, err := ParseImageFileCS(strings.NewReader(input), false, BT601, LimitedRange)
+	if err == nil {
+		t.Error("expected error when no grid is present")
+	}
+}
+
+func TestParseImageFileCSBadColor(t *testing.T) {
+	input := "x=abc\n\nx\n"
+	_, _, _, err := ParseImageFileCS(strings.NewReader(input), false, BT601, LimitedRange)
+	if err == nil {
+		t.Error("expected error for invalid color spec")
+	}
+}
+
+func TestParseImageFileCSGridWithoutSeparator(t *testing.T) {
+	// Grid starts without blank line separator when no = in line
+	input := "x=235,128,128\nxy\nyx\n"
+	grid, _, _, err := ParseImageFileCS(strings.NewReader(input), false, BT601, LimitedRange)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if grid.Width != 2 || grid.Height != 2 {
+		t.Errorf("grid %dx%d, want 2x2", grid.Width, grid.Height)
+	}
+}
+
+func TestParseColorSpecCSInvalidFormat(t *testing.T) {
+	badSpecs := []string{
+		"",          // no = sign (handled by caller)
+		"x=1,2",     // too few values
+		"x=1,2,3,4", // too many values
+		"x=a,b,c",   // non-numeric
+		"=1,2,3",    // empty char
+	}
+	for _, spec := range badSpecs {
+		_, _, err := ParseColorSpecCS(spec, false, BT601, LimitedRange)
+		if err == nil {
+			t.Errorf("ParseColorSpecCS(%q) should return error", spec)
+		}
+	}
+}
+
+func TestParseColorSpecCSWithColorSpace(t *testing.T) {
+	// RGB white with BT.709 should produce different Y than BT.601 for saturated colors
+	_, c601, err := ParseColorSpecCS("r=255,0,0", true, BT601, LimitedRange)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, c709, err := ParseColorSpecCS("r=255,0,0", true, BT709, LimitedRange)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// BT.709 red should have different luma than BT.601 red
+	if c601.Y == c709.Y {
+		t.Error("BT.601 and BT.709 red Y should differ")
+	}
+}

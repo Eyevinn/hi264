@@ -27,11 +27,11 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/Eyevinn/mp4ff/avc"
-	"github.com/Eyevinn/mp4ff/mp4"
 	"github.com/Eyevinn/hi264/internal"
 	"github.com/Eyevinn/hi264/pkg/encode"
 	"github.com/Eyevinn/hi264/pkg/yuv"
+	"github.com/Eyevinn/mp4ff/avc"
+	"github.com/Eyevinn/mp4ff/mp4"
 )
 
 const appName = "hi264gen"
@@ -87,6 +87,8 @@ type options struct {
 	jpegQual    int
 	fps         int
 	fragDur     int
+	colorspace  string
+	fullRange   bool
 	output      string
 }
 
@@ -114,6 +116,8 @@ func parseOptions(fs *flag.FlagSet, args []string) (*options, error) {
 	fs.IntVar(&opts.jpegQual, "q", 85, "JPEG quality (1-100)")
 	fs.IntVar(&opts.fps, "fps", 25, "framerate for MP4 output")
 	fs.IntVar(&opts.fragDur, "frag-dur", 25, "fragment duration in frames for MP4 output")
+	fs.StringVar(&opts.colorspace, "colorspace", "bt601", "color space (bt601, bt709, bt2020)")
+	fs.BoolVar(&opts.fullRange, "full-range", false, "use full-range YCbCr (0-255)")
 	fs.StringVar(&opts.output, "o", "", "output file (required)")
 	fs.Usage = func() {
 		fmt.Fprintf(os.Stderr, usg, appName, appName, appName, appName)
@@ -123,7 +127,7 @@ func parseOptions(fs *flag.FlagSet, args []string) (*options, error) {
 	return &opts, err
 }
 
-func parseRGB(s string) (yuv.Color, error) {
+func parseRGBWithCS(s string, cs yuv.ColorSpace, rng yuv.Range) (yuv.Color, error) {
 	parts := strings.Split(s, ",")
 	if len(parts) != 3 {
 		return yuv.Color{}, fmt.Errorf("expected R,G,B got %q", s)
@@ -139,7 +143,7 @@ func parseRGB(s string) (yuv.Color, error) {
 		}
 		rgb[i] = uint8(v)
 	}
-	return yuv.RGBToYCbCr(rgb[0], rgb[1], rgb[2]), nil
+	return yuv.RGBToYCbCrCS(rgb[0], rgb[1], rgb[2], cs, rng), nil
 }
 
 func main() {
@@ -176,6 +180,16 @@ func run(args []string) error {
 		return fmt.Errorf("-smpte is mutually exclusive with -f and -grid/-c")
 	}
 
+	// Parse color space early since it's needed for image file parsing
+	cs, err := yuv.ParseColorSpace(opts.colorspace)
+	if err != nil {
+		return err
+	}
+	var rng yuv.Range
+	if opts.fullRange {
+		rng = yuv.FullRange
+	}
+
 	// Parse grid input (if any)
 	var patGrid *yuv.Grid
 	var patColors yuv.ColorMap
@@ -189,9 +203,14 @@ func run(args []string) error {
 			return ferr
 		}
 		defer f.Close()
-		patGrid, patColors, err = yuv.ParseImageFile(f, opts.rgb)
+		var fileCS yuv.ColorSpace
+		patGrid, patColors, fileCS, err = yuv.ParseImageFileCS(f, opts.rgb, cs, rng)
 		if err != nil {
 			return fmt.Errorf("parsing image file: %w", err)
+		}
+		// File directive overrides CLI default (unless CLI explicitly set non-default)
+		if opts.colorspace == "bt601" {
+			cs = fileCS
 		}
 	} else if opts.grid != "" {
 		patGrid, err = yuv.ParseGrid(opts.grid)
@@ -199,8 +218,8 @@ func run(args []string) error {
 			return fmt.Errorf("parsing grid: %w", err)
 		}
 		patColors = make(yuv.ColorMap)
-		for _, cs := range opts.colors {
-			ch, c, cerr := yuv.ParseColorSpec(cs, opts.rgb)
+		for _, cspec := range opts.colors {
+			ch, c, cerr := yuv.ParseColorSpec(cspec, opts.rgb)
 			if cerr != nil {
 				return fmt.Errorf("parsing color: %w", cerr)
 			}
@@ -249,11 +268,11 @@ func run(args []string) error {
 		return fmt.Errorf("frag-dur must be positive, got %d", opts.fragDur)
 	}
 
-	fgColor, err := parseRGB(opts.fg)
+	fgColor, err := parseRGBWithCS(opts.fg, cs, rng)
 	if err != nil {
 		return fmt.Errorf("parsing -fg: %w", err)
 	}
-	bgColor, err := parseRGB(opts.bg)
+	bgColor, err := parseRGBWithCS(opts.bg, cs, rng)
 	if err != nil {
 		return fmt.Errorf("parsing -bg: %w", err)
 	}
@@ -276,7 +295,7 @@ func run(args []string) error {
 
 	// Create SMPTE grid now that mbWidth is known.
 	if opts.smpte {
-		patGrid, patColors = yuv.SMPTEBarsGrid(mbWidth)
+		patGrid, patColors = yuv.SMPTEBarsGridCS(mbWidth, cs, rng)
 	}
 
 	digitScale := opts.digitScale
@@ -286,7 +305,7 @@ func run(args []string) error {
 
 	var digitBg *yuv.Color
 	if opts.digitBg != "" && opts.digits > 0 {
-		c, derr := parseRGB(opts.digitBg)
+		c, derr := parseRGBWithCS(opts.digitBg, cs, rng)
 		if derr != nil {
 			return fmt.Errorf("parsing -digit-bg: %w", derr)
 		}
@@ -305,22 +324,22 @@ func run(args []string) error {
 	switch {
 	case ext == ".264":
 		return generateH264(opts, frameW, frameH, mbWidth, mbHeight, disableDeblock,
-			bgColor, fgColor, patGrid, patColors, tiled, digitScale, digitBg)
+			bgColor, fgColor, patGrid, patColors, tiled, digitScale, digitBg, cs, rng)
 	case ext == ".mp4":
 		return generateMP4(opts, frameW, frameH, mbWidth, mbHeight, disableDeblock,
-			bgColor, fgColor, patGrid, patColors, tiled, digitScale, digitBg)
+			bgColor, fgColor, patGrid, patColors, tiled, digitScale, digitBg, cs, rng)
 	case ext == ".y4m":
 		return generateY4M(opts, frameW, frameH, mbWidth, mbHeight,
-			bgColor, fgColor, patGrid, patColors, tiled, digitScale, digitBg)
+			bgColor, fgColor, patGrid, patColors, tiled, digitScale, digitBg, cs, rng)
 	case ext == ".yuv":
 		return generateYUV(opts, frameW, frameH, mbWidth, mbHeight,
 			bgColor, fgColor, patGrid, patColors, tiled, digitScale, digitBg)
 	case hasPct:
 		return generateFormattedImages(opts, frameW, frameH, mbWidth, mbHeight,
-			bgColor, fgColor, patGrid, patColors, tiled, digitScale, digitBg)
+			bgColor, fgColor, patGrid, patColors, tiled, digitScale, digitBg, cs, rng)
 	case ext == ".png" || ext == ".jpg" || ext == ".jpeg":
 		return generateNumberedImages(opts, frameW, frameH, mbWidth, mbHeight,
-			bgColor, fgColor, patGrid, patColors, tiled, digitScale, digitBg)
+			bgColor, fgColor, patGrid, patColors, tiled, digitScale, digitBg, cs, rng)
 	default:
 		return fmt.Errorf("unknown output format %q"+
 			" (use .264, .mp4, .y4m, .yuv, .png, .jpg, or %% pattern)", ext)
@@ -375,7 +394,7 @@ func buildFrameGrid(i int, patGrid *yuv.Grid, patColors yuv.ColorMap,
 
 func generateH264(opts *options, frameW, frameH, mbWidth, mbHeight, disableDeblock int,
 	bg, fg yuv.Color, patGrid *yuv.Grid, patColors yuv.ColorMap, tiled bool,
-	digitScale int, digitBg *yuv.Color) error {
+	digitScale int, digitBg *yuv.Color, cs yuv.ColorSpace, rng yuv.Range) error {
 
 	f, err := os.Create(opts.output)
 	if err != nil {
@@ -403,6 +422,8 @@ func generateH264(opts *options, frameW, frameH, mbWidth, mbHeight, disableDeblo
 		MaxNumRefFrames: maxRef,
 		Width:           frameW,
 		Height:          frameH,
+		ColorSpace:      cs,
+		Range:           rng,
 	}
 
 	// Write SPS+PPS once
@@ -419,7 +440,7 @@ func generateH264(opts *options, frameW, frameH, mbWidth, mbHeight, disableDeblo
 			bg, fg, enc, patGrid, patColors, tiled, digitScale, digitBg)
 	} else {
 		err = generateH264AllIDR(f, opts, frameW, frameH, mbWidth, mbHeight, disableDeblock,
-			bg, fg, patGrid, patColors, tiled, digitScale, digitBg)
+			bg, fg, patGrid, patColors, tiled, digitScale, digitBg, cs, rng)
 	}
 	if err != nil {
 		return err
@@ -456,7 +477,7 @@ func padSlice(slice []byte, bpp int, frameIdx int) ([]byte, error) {
 
 func generateH264AllIDR(f *os.File, opts *options, frameW, frameH, mbWidth, mbHeight, disableDeblock int,
 	bg, fg yuv.Color, patGrid *yuv.Grid, patColors yuv.ColorMap, tiled bool,
-	digitScale int, digitBg *yuv.Color) error {
+	digitScale int, digitBg *yuv.Color, cs yuv.ColorSpace, rng yuv.Range) error {
 
 	for i := range opts.numFrames {
 		grid, colors, err := buildFrameGrid(i, patGrid, patColors,
@@ -472,6 +493,8 @@ func generateH264AllIDR(f *os.File, opts *options, frameW, frameH, mbWidth, mbHe
 			CABAC:          opts.cabac,
 			Width:          frameW,
 			Height:         frameH,
+			ColorSpace:     cs,
+			Range:          rng,
 		}
 		slice, err := enc.EncodeSlice(uint32(i % 2))
 		if err != nil {
@@ -534,7 +557,7 @@ func generateH264WithPSkip(f *os.File, opts *options, mbWidth, mbHeight int,
 
 func generateMP4(opts *options, frameW, frameH, mbWidth, mbHeight, disableDeblock int,
 	bg, fg yuv.Color, patGrid *yuv.Grid, patColors yuv.ColorMap, tiled bool,
-	digitScale int, digitBg *yuv.Color) error {
+	digitScale int, digitBg *yuv.Color, cs yuv.ColorSpace, rng yuv.Range) error {
 
 	f, err := os.Create(opts.output)
 	if err != nil {
@@ -550,10 +573,10 @@ func generateMP4(opts *options, frameW, frameH, mbWidth, mbHeight, disableDebloc
 	// Build SPS/PPS as raw NALUs (no start codes) for SetAVCDescriptor
 	var spsRBSP, ppsRBSP []byte
 	if opts.cabac {
-		spsRBSP = encode.EncodeSPSMain(frameW, frameH, maxRef)
+		spsRBSP = encode.EncodeSPSMain(frameW, frameH, maxRef, cs, rng)
 		ppsRBSP = encode.EncodePPSCABAC(disableDeblock)
 	} else {
-		spsRBSP = encode.EncodeSPS(frameW, frameH, maxRef)
+		spsRBSP = encode.EncodeSPS(frameW, frameH, maxRef, cs, rng)
 		ppsRBSP = encode.EncodePPS(disableDeblock)
 	}
 	spsNALU := encode.BuildNALU(7, 3, spsRBSP)
@@ -585,6 +608,8 @@ func generateMP4(opts *options, frameW, frameH, mbWidth, mbHeight, disableDebloc
 		MaxNumRefFrames: maxRef,
 		Width:           frameW,
 		Height:          frameH,
+		ColorSpace:      cs,
+		Range:           rng,
 	}
 
 	// Encode all frames and collect as MP4 samples
@@ -643,6 +668,8 @@ func generateMP4(opts *options, frameW, frameH, mbWidth, mbHeight, disableDebloc
 				CABAC:          opts.cabac,
 				Width:          frameW,
 				Height:         frameH,
+				ColorSpace:     cs,
+				Range:          rng,
 			}
 			slice, err := enc.EncodeSlice(uint32(i % 2))
 			if err != nil {
@@ -710,7 +737,7 @@ func generateMP4(opts *options, frameW, frameH, mbWidth, mbHeight, disableDebloc
 
 func generateY4M(opts *options, frameW, frameH, mbWidth, mbHeight int,
 	bg, fg yuv.Color, patGrid *yuv.Grid, patColors yuv.ColorMap, tiled bool,
-	digitScale int, digitBg *yuv.Color) error {
+	digitScale int, digitBg *yuv.Color, cs yuv.ColorSpace, rng yuv.Range) error {
 
 	f, err := os.Create(opts.output)
 	if err != nil {
@@ -718,7 +745,7 @@ func generateY4M(opts *options, frameW, frameH, mbWidth, mbHeight int,
 	}
 	defer f.Close()
 
-	if err := yuv.WriteY4MHeader(f, frameW, frameH); err != nil {
+	if err := yuv.WriteY4MHeaderCS(f, frameW, frameH, cs, rng); err != nil {
 		return err
 	}
 
@@ -746,7 +773,7 @@ func generateY4M(opts *options, frameW, frameH, mbWidth, mbHeight int,
 
 func generateFormattedImages(opts *options, frameW, frameH, mbWidth, mbHeight int,
 	bg, fg yuv.Color, patGrid *yuv.Grid, patColors yuv.ColorMap, tiled bool,
-	digitScale int, digitBg *yuv.Color) error {
+	digitScale int, digitBg *yuv.Color, cs yuv.ColorSpace, rng yuv.Range) error {
 
 	ext := strings.ToLower(filepath.Ext(opts.output))
 	isJPEG := ext == ".jpg" || ext == ".jpeg"
@@ -769,9 +796,9 @@ func generateFormattedImages(opts *options, frameW, frameH, mbWidth, mbHeight in
 			return err
 		}
 		if isJPEG {
-			err = yuv.WriteJPEG(f, frame, opts.jpegQual)
+			err = yuv.WriteJPEGCS(f, frame, opts.jpegQual, cs, rng)
 		} else {
-			err = yuv.WritePNG(f, frame)
+			err = yuv.WritePNGCS(f, frame, cs, rng)
 		}
 		f.Close()
 		if err != nil {
@@ -818,7 +845,7 @@ func generateYUV(opts *options, frameW, frameH, mbWidth, mbHeight int,
 
 func generateNumberedImages(opts *options, frameW, frameH, mbWidth, mbHeight int,
 	bg, fg yuv.Color, patGrid *yuv.Grid, patColors yuv.ColorMap, tiled bool,
-	digitScale int, digitBg *yuv.Color) error {
+	digitScale int, digitBg *yuv.Color, cs yuv.ColorSpace, rng yuv.Range) error {
 
 	ext := strings.ToLower(filepath.Ext(opts.output))
 	isJPEG := ext == ".jpg" || ext == ".jpeg"
@@ -848,9 +875,9 @@ func generateNumberedImages(opts *options, frameW, frameH, mbWidth, mbHeight int
 			return err
 		}
 		if isJPEG {
-			err = yuv.WriteJPEG(f, frame, opts.jpegQual)
+			err = yuv.WriteJPEGCS(f, frame, opts.jpegQual, cs, rng)
 		} else {
-			err = yuv.WritePNG(f, frame)
+			err = yuv.WritePNGCS(f, frame, cs, rng)
 		}
 		f.Close()
 		if err != nil {

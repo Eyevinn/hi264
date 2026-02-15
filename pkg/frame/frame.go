@@ -12,6 +12,11 @@ type Frame struct {
 	Cr       []uint8 // chroma red plane
 	StrideY  int     // bytes per row for luma
 	StrideC  int     // bytes per row for chroma
+
+	// Color space metadata (populated from SPS VUI if available)
+	MatrixCoefficients    uint // 0=unspecified, 1=BT.709, 5=BT.601, 9=BT.2020
+	VideoFullRangeFlag    bool // true = full range (0-255)
+	ColorDescriptionValid bool // true if color description was present in SPS VUI
 }
 
 // NewFrame creates a new frame buffer for the given dimensions.

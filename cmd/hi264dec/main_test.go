@@ -42,7 +42,7 @@ func generateTestBitstream(t *testing.T, dir string) string {
 func generateTestMP4(t *testing.T, dir string) string {
 	t.Helper()
 
-	spsRBSP := encode.EncodeSPS(32, 32, 0)
+	spsRBSP := encode.EncodeSPS(32, 32, 0, 0, 0)
 	ppsRBSP := encode.EncodePPS(0)
 	spsNALU := encode.BuildNALU(7, 3, spsRBSP)
 	ppsNALU := encode.BuildNALU(8, 3, ppsRBSP)
