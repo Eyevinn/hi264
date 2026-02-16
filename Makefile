@@ -1,4 +1,4 @@
-.PHONY: all build test coverage check pre-commit codespell clean install
+.PHONY: all build test coverage check pre-commit pre-commit-install codespell clean install
 
 LDFLAGS = -X github.com/Eyevinn/hi264/internal.commitVersion=$$(git describe --tags HEAD 2>/dev/null || echo dev-$$(git rev-parse --short HEAD)) \
           -X github.com/Eyevinn/hi264/internal.commitDate=$$(git log -1 --format=%ct)
@@ -25,19 +25,18 @@ coverage:
 check:
 	golangci-lint run
 
+pre-commit-install: venv/bin/pre-commit
+	venv/bin/pre-commit install
+
 pre-commit: venv/bin/pre-commit
 	venv/bin/pre-commit run --all-files
 
-venv/bin/pre-commit:
+venv/bin/pre-commit venv/bin/codespell:
 	python3 -m venv venv
-	venv/bin/pip install pre-commit
+	venv/bin/pip install pre-commit codespell
 
 codespell: venv/bin/codespell
-	venv/bin/codespell
-
-venv/bin/codespell:
-	python3 -m venv venv
-	venv/bin/pip install codespell
+	venv/bin/codespell -S venv,coverage.html,'*.y4m','*.264','*.mp4' -L ue,trun,truns
 
 clean:
 	rm -rf out/ coverage.out coverage.html coverage.txt venv/
