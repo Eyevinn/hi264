@@ -280,6 +280,71 @@ pps, _ := encode.GeneratePPS(p)
 idr, _ := encode.GenerateIDR(p, grid, colors, 0)
 ```
 
+### Appending frames to an existing bitstream
+
+This example parses SPS/PPS from an existing H.264 bitstream, then appends
+a black IDR frame and a P\_Skip frame that are compatible with the original
+parameter sets:
+
+```go
+import (
+    "github.com/Eyevinn/mp4ff/avc"
+    "github.com/Eyevinn/hi264/pkg/encode"
+    "github.com/Eyevinn/hi264/pkg/yuv"
+)
+
+// Parse parameter sets from the existing bitstream
+nalus := avc.ExtractNalusFromByteStream(existingStream)
+spsMap := make(map[uint32]*avc.SPS)
+var sps *avc.SPS
+var pps *avc.PPS
+for _, nalu := range nalus {
+    if len(nalu) < 1 {
+        continue
+    }
+    naluType := nalu[0] & 0x1f
+    switch naluType {
+    case 7: // SPS
+        sps, _ = avc.ParseSPSNALUnit(nalu, true)
+        spsMap[sps.ParameterID] = sps
+    case 8: // PPS
+        pps, _ = avc.ParsePPSNALUnit(nalu, spsMap)
+    }
+}
+
+// Create a single-color black grid matching the frame dimensions
+w := int(sps.Width)
+h := int(sps.Height)
+mbW := (w + 15) / 16
+mbH := (h + 15) / 16
+blackY := uint8(16)  // limited range black
+if sps.VUI != nil && sps.VUI.VideoFullRangeFlag {
+    blackY = 0       // full range black
+}
+row := make([]byte, mbW)
+for i := range row { row[i] = 'B' }
+chars := make([][]byte, mbH)
+for i := range chars { chars[i] = row }
+grid := &yuv.Grid{Width: mbW, Height: mbH, Chars: chars}
+colors := yuv.ColorMap{'B': yuv.Color{Y: blackY, Cb: 128, Cr: 128}}
+
+// Encode a black IDR frame using parameters matching the existing SPS/PPS
+p := encode.EncodeParams{
+    Width:  w,
+    Height: h,
+    QP:     26,
+    CABAC:  pps.EntropyCodingModeFlag,
+}
+idrSlice, _ := encode.GenerateIDR(p, grid, colors, 0)
+
+// Encode a P_Skip slice (copies the IDR frame unchanged)
+pSkipSlice, _ := encode.EncodePSkipSlice(sps, pps, 1, 0)
+
+// Append to the original stream
+stream := append(existingStream, idrSlice...)
+stream = append(stream, pSkipSlice...)
+```
+
 ## Architecture
 
 ```
