@@ -315,18 +315,11 @@ for _, nalu := range nalus {
 // Create a single-color black grid matching the frame dimensions
 w := int(sps.Width)
 h := int(sps.Height)
-mbW := (w + 15) / 16
-mbH := (h + 15) / 16
 blackY := uint8(16)  // limited range black
 if sps.VUI != nil && sps.VUI.VideoFullRangeFlag {
     blackY = 0       // full range black
 }
-row := make([]byte, mbW)
-for i := range row { row[i] = 'B' }
-chars := make([][]byte, mbH)
-for i := range chars { chars[i] = row }
-grid := &yuv.Grid{Width: mbW, Height: mbH, Chars: chars}
-colors := yuv.ColorMap{'B': yuv.Color{Y: blackY, Cb: 128, Cr: 128}}
+grid, colors := yuv.SolidGrid(w, h, yuv.Color{Y: blackY, Cb: 128, Cr: 128})
 
 // Encode a black IDR frame using parameters matching the existing SPS/PPS
 p := encode.EncodeParams{
