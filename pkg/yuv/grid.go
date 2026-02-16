@@ -133,6 +133,23 @@ func clipU8(v int) uint8 {
 	return uint8(v)
 }
 
+// SolidGrid creates a uniform grid of a single color, sized to cover the
+// given pixel dimensions (rounded up to whole macroblocks).
+func SolidGrid(width, height int, c Color) (*Grid, ColorMap) {
+	mbW := (width + 15) / 16
+	mbH := (height + 15) / 16
+	chars := make([][]byte, mbH)
+	for i := range chars {
+		row := make([]byte, mbW)
+		for j := range row {
+			row[j] = '.'
+		}
+		chars[i] = row
+	}
+	return &Grid{Width: mbW, Height: mbH, Chars: chars},
+		ColorMap{'.': c}
+}
+
 // BuildFrame creates a frame from a grid and color map, filling each MB with solid color.
 func BuildFrame(grid *Grid, colors ColorMap) (*frame.Frame, error) {
 	width := grid.Width * 16
