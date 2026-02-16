@@ -7,11 +7,11 @@
 [![license](https://img.shields.io/github/license/Eyevinn/hi264.svg)](https://github.com/Eyevinn/hi264/blob/main/LICENSE)
 [![Badge OSC](https://img.shields.io/badge/Evaluate-24243B?style=for-the-badge&logo=data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjQiIGhlaWdodD0iMjQiIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPGNpcmNsZSBjeD0iMTIiIGN5PSIxMiIgcj0iMTIiIGZpbGw9InVybCgjcGFpbnQwX2xpbmVhcl8yODIxXzMxNjcyKSIvPgo8Y2lyY2xlIGN4PSIxMiIgY3k9IjEyIiByPSI3IiBzdHJva2U9ImJsYWNrIiBzdHJva2Utd2lkdGg9IjIiLz4KPGRlZnM%2BCjxsaW5lYXJHcmFkaWVudCBpZD0icGFpbnQwX2xpbmVhcl8yODIxXzMxNjcyIiB4MT0iMTIiIHkxPSIwIiB4Mj0iMTIiIHkyPSIyNCIgZ3JhZGllbnRVbml0cz0idXNlclNwYWNlT25Vc2UiPgo8c3RvcCBzdG9wLWNvbG9yPSIjQzE4M0ZGIi8%2BCjxzdG9wIG9mZnNldD0iMSIgc3RvcC1jb2xvcj0iIzREQzlGRiIvPgo8L2xpbmVhckdyYWRpZW50Pgo8L2RlZnM%2BCjwvc3ZnPgo%3D)](https://app.osaas.io/browse/eyevinn-mp4ff)
 
-## Pure Go H.264/AVC Frame Decoder & Bitstream Generator
-A pure Go H.264/AVC decoder for IDR and P_Skip frames with both CABAC and CAVLC
+## Pure Go H.264/AVC IDR Decoder & Bitstream Generator
+A pure Go H.264/AVC decoder for IDR (and P_Skip) frames with both CABAC and CAVLC
 entropy coding, plus a bitstream generator for producing valid H.264 test
 content with IDR and empty P-frames from flat-color 16x16 macroblock patterns.
-Further use external SPS/PPS to be able to extend current video with more frames.
+It can also be used to extend video with extra frames without a change of SPS/PPS.
 
 This is **not** a general-purpose video encoder — it does not accept arbitrary
 pixel input or perform motion estimation. The encoder produces I_16x16 DC
@@ -19,7 +19,7 @@ prediction frames where each macroblock is a single flat color, defined by a
 grid pattern. This is useful for generating test bitstreams, color bars, frame
 counters, and reference content for decoder verification.
 
-All processing is 8-bit 4:2:0 only (no 10-bit or 4:2:2/4:4:4 support).
+All processing is currently 8-bit 4:2:0 only (no 10-bit or 4:2:2/4:4:4 support).
 
 Pixel-perfect match with FFmpeg IDR decoding across 41+ golden test cases covering varied
 content, profiles, QP ranges, scaling matrices, deblocking, resolutions, and
@@ -34,9 +34,9 @@ go test ./...
 
 ## CLI Tools
 
-### hi264dec — Decode H.264 from raw .264 or MP4
+### hi264dec — Decode H.264 IDR frames from raw .264 or MP4
 
-Auto-detects input format by extension (`.mp4`/`.m4v` = MP4, else Annex-B).
+Auto-detects input format by extension (`.mp4`/`.m4v` = MP4, else Annex-B raw bitstream).
 Output format detected from output extension: `.png`, `.jpg`/`.jpeg`, `.y4m`, `.yuv`.
 
 ```bash
@@ -65,13 +65,23 @@ grid maps to one 16x16 macroblock filled with a single flat color, encoded as
 I_16x16 with DC prediction. This is not a general-purpose encoder — it produces
 test content from color patterns, not from arbitrary video frames.
 
-Output formats: Annex-B `.264`, fragmented MP4 `.mp4`, Y4M `.y4m`, raw YUV
-`.yuv`, PNG `.png`, or JPEG `.jpg`. For H.264 output, supports both CAVLC
+Output formats:
+
+| Extension | Format | Notes |
+|---|---|---|
+| `.264` | Annex-B | Raw H.264 bitstream |
+| `.mp4` | Fragmented MP4 | fMP4/CMAF with configurable fps and fragment duration |
+| `.y4m` | Y4M | YUV4MPEG2 container |
+| `.yuv` | Raw YUV | 4:2:0 planar (auto-adds `_WxH_yuv420p` suffix) |
+| `.png` | PNG | Raw grid output (no H.264 encoding) |
+| `.jpg` | JPEG | Raw grid output (`-q` for quality, default 85) |
+
+For H.264 output, supports both CAVLC
 (Baseline profile) and CABAC (Main profile) entropy coding. Multi-frame
 sequences use P_Skip frames between IDR keyframes to copy the reference frame
-unchanged (~76% size reduction vs all-IDR). Raw image formats (YUV, PNG, JPEG)
+unchanged (huge size reduction vs all-IDR). Image formats (YUV, Y4M, PNG, JPEG)
 output the grid pattern directly without H.264 encoding, useful as reference
-images for decoder verification.
+images for encode-decode chain verification.
 
 ```bash
 # Grid-only: single IDR frame from grid pattern (frame size = grid size)
@@ -124,13 +134,34 @@ go run ./cmd/hi264gen -f examples/sweden.gridimg -colorspace bt709 -o sweden_709
 go run ./cmd/hi264gen -smpte -w 320 -h 240 -colorspace bt709 -full-range -o smpte_709.264
 ```
 
-Flags: `-f` (image file), `-grid`, `-c` (repeatable), `-rgb`, `-smpte` (SMPTE color bars),
-`-w` (width), `-h` (height), `-n` (frame count, default 1), `-digits` (counter digits, default 0),
-`-digit-scale` (0=auto), `-digit-bg` (R,G,B for digit box),
-`-fg` (R,G,B), `-bg` (R,G,B), `-qp` (0-51), `-cabac`, `-no-deblock`, `-q` (JPEG quality),
-`-idr-interval` (0=all-IDR), `-bpp` (bytes per picture),
-`-colorspace` (`bt601`/`bt709`/`bt2020`, default `bt601`), `-full-range`,
-`-fps` (MP4 framerate, default 25), `-frag-dur` (MP4 fragment duration in frames, default 25), `-o`
+Flags:
+
+| Flag | Description | Default |
+|---|---|---|
+| `-f` | Grid image file (`.gridimg`) | — |
+| `-grid` | Inline grid string (e.g. `"xy,yx"`) | — |
+| `-c` | Color mapping (repeatable, e.g. `x=235,128,128`) | — |
+| `-rgb` | Treat `-c` values as RGB instead of YCbCr | off |
+| `-smpte` | Use built-in 75% SMPTE color bars pattern | off |
+| `-w` | Frame width in pixels | grid width |
+| `-h` | Frame height in pixels | grid height |
+| `-n` | Number of frames | 1 |
+| `-digits` | Counter digit count (0 = no counter) | 0 |
+| `-digit-scale` | Digit scale factor (0 = auto-fit) | 0 |
+| `-digit-bg` | Digit background box color (R,G,B) | none |
+| `-fg` | Foreground color (R,G,B) | — |
+| `-bg` | Background color (R,G,B) | — |
+| `-qp` | Quantization parameter | 26 |
+| `-cabac` | Use CABAC entropy coding (Main profile) | off (CAVLC) |
+| `-no-deblock` | Disable deblocking filter | off |
+| `-q` | JPEG quality | 85 |
+| `-idr-interval` | Frames between IDR keyframes (0 = all-IDR) | 0 |
+| `-bpp` | Bytes per picture (filler NAL padding) | 0 (off) |
+| `-colorspace` | Color space (`bt601`/`bt709`/`bt2020`) | `bt601` |
+| `-full-range` | Full-range YCbCr (0-255) | off (limited) |
+| `-fps` | MP4 framerate | 25 |
+| `-frag-dur` | MP4 fragment duration in frames | 25 |
+| `-o` | Output file | — |
 
 ### Constant bitrate testing with `-bpp`
 
@@ -272,8 +303,6 @@ testdata/          — Golden H.264 bitstreams for regression testing
 ## Dependencies
 
 - [`github.com/Eyevinn/mp4ff`](https://github.com/Eyevinn/mp4ff) — SPS/PPS/SliceHeader parsing, MP4 container, NAL extraction, fragmented MP4 creation
-
-[![Badge OSC](https://img.shields.io/badge/Evaluate-24243B?style=for-the-badge&logo=data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjQiIGhlaWdodD0iMjQiIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPGNpcmNsZSBjeD0iMTIiIGN5PSIxMiIgcj0iMTIiIGZpbGw9InVybCgjcGFpbnQwX2xpbmVhcl8yODIxXzMxNjcyKSIvPgo8Y2lyY2xlIGN4PSIxMiIgY3k9IjEyIiByPSI3IiBzdHJva2U9ImJsYWNrIiBzdHJva2Utd2lkdGg9IjIiLz4KPGRlZnM+CjxsaW5lYXJHcmFkaWVudCBpZD0icGFpbnQwX2xpbmVhcl8yODIxXzMxNjcyIiB4MT0iMTIiIHkxPSIwIiB4Mj0iMTIiIHkyPSIyNCIgZ3JhZGllbnRVbml0cz0idXNlclNwYWNlT25Vc2UiPgo8c3RvcCBzdG9wLWNvbG9yPSIjQzE4M0ZGIi8+CjxzdG9wIG9mZnNldD0iMSIgc3RvcC1jb2xvcj0iIzREQzlGRiIvPgo8L2xpbmVhckdyYWRpZW50Pgo8L2RlZnM+Cjwvc3ZnPgo=)](https://app.osaas.io/browse/eyevinn-mp4ff)
 
 ## Support
 
