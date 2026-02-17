@@ -56,6 +56,9 @@ go run ./cmd/hi264dec -no-deblock input.264 output.yuv # skip deblocking filter
 go run ./cmd/hi264dec -q 95 input.264 output.jpg       # JPEG quality (default 85)
 go run ./cmd/hi264dec -colorspace bt709 input.264 output.png  # override color space
 go run ./cmd/hi264dec input.264                        # decode only, print info
+
+# Decode IDR + P_Skip frames (for hi264gen-produced streams)
+go run ./cmd/hi264dec -idr-and-skip -n 10 input.264 frames.png
 ```
 
 ### hi264gen — H.264 bitstream generator for test content

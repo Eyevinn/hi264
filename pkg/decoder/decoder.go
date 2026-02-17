@@ -210,8 +210,20 @@ func (d *Decoder) DecodeNALUs(nalus [][]byte) (*frame.Frame, error) {
 }
 
 // DecodeAllFrames decodes all frames from a set of NALUs (IDR and non-IDR).
+// Non-IDR slices are decoded as P_Skip (copy from reference); an error is
+// returned if a non-IDR slice contains non-skip macroblocks.
 // Returns frames in decode order.
 func (d *Decoder) DecodeAllFrames(nalus [][]byte) ([]*frame.Frame, error) {
+	return d.decodeFrames(nalus, true)
+}
+
+// DecodeIDRFrames decodes only IDR frames from a set of NALUs, skipping
+// all non-IDR slices. Returns frames in decode order.
+func (d *Decoder) DecodeIDRFrames(nalus [][]byte) ([]*frame.Frame, error) {
+	return d.decodeFrames(nalus, false)
+}
+
+func (d *Decoder) decodeFrames(nalus [][]byte, includeNonIDR bool) ([]*frame.Frame, error) {
 	var frames []*frame.Frame
 
 	for _, nalu := range nalus {
@@ -241,6 +253,9 @@ func (d *Decoder) DecodeAllFrames(nalus [][]byte) ([]*frame.Frame, error) {
 			d.refFrame = f
 			frames = append(frames, f)
 		case 1: // non-IDR coded slice
+			if !includeNonIDR {
+				continue
+			}
 			f, err := d.decodePSkip(nalu)
 			if err != nil {
 				return frames, fmt.Errorf("p frame %d: %w", len(frames), err)
@@ -264,6 +279,12 @@ func (d *Decoder) DecodeAllAnnexB(data []byte) ([]*frame.Frame, error) {
 	return d.DecodeAllFrames(nalus)
 }
 
+// DecodeIDRAnnexB decodes only IDR frames from an Annex-B byte stream.
+func (d *Decoder) DecodeIDRAnnexB(data []byte) ([]*frame.Frame, error) {
+	nalus := avc.ExtractNalusFromByteStream(data)
+	return d.DecodeIDRFrames(nalus)
+}
+
 // DecodeAVC decodes the first IDR frame from AVC-format data
 // (each NALU preceded by a 4-byte big-endian length field).
 func (d *Decoder) DecodeAVC(data []byte) (*frame.Frame, error) {
@@ -282,6 +303,16 @@ func (d *Decoder) DecodeAllAVC(data []byte) ([]*frame.Frame, error) {
 		return nil, err
 	}
 	return d.DecodeAllFrames(nalus)
+}
+
+// DecodeIDRAVC decodes only IDR frames from AVC-format data
+// (each NALU preceded by a 4-byte big-endian length field).
+func (d *Decoder) DecodeIDRAVC(data []byte) ([]*frame.Frame, error) {
+	nalus, err := extractAVCNalus(data)
+	if err != nil {
+		return nil, err
+	}
+	return d.DecodeIDRFrames(nalus)
 }
 
 // extractAVCNalus extracts NALUs from AVC-format data where each NALU

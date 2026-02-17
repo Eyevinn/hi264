@@ -245,7 +245,7 @@ func TestDecodeMultiFramePNG(t *testing.T) {
 	}
 
 	output := filepath.Join(dir, "frame.png")
-	if err := run([]string{appName, "-n", "2", input, output}); err != nil {
+	if err := run([]string{appName, "-n", "2", "-idr-and-skip", input, output}); err != nil {
 		t.Fatalf("run: %v", err)
 	}
 
@@ -310,5 +310,33 @@ func TestDecodeProgressiveMP4(t *testing.T) {
 	}
 	if info.Size() == 0 {
 		t.Error("empty PNG output")
+	}
+}
+
+func TestDecodeMP4IDROnly(t *testing.T) {
+	// MP4 with 1 IDR + 1 normal P-frame: without -idr-and-skip, only the IDR is decoded
+	dir := t.TempDir()
+	output := filepath.Join(dir, "frame.png")
+
+	err := run([]string{appName, "-n", "10", "../../testdata/avc_1idr_1p.mp4", output})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	// Should produce exactly 1 frame (the IDR), skipping the P-frame
+	_, err = os.Stat(output)
+	if err != nil {
+		t.Fatalf("expected single output file: %v", err)
+	}
+}
+
+func TestDecodeMP4IDRAndSkipFailsOnRealP(t *testing.T) {
+	// MP4 with a real P-frame (not P_Skip): -idr-and-skip should fail
+	dir := t.TempDir()
+	output := filepath.Join(dir, "frame.png")
+
+	err := run([]string{appName, "-n", "10", "-idr-and-skip", "../../testdata/avc_1idr_1p.mp4", output})
+	if err == nil {
+		t.Fatal("expected error decoding real P-frame with -idr-and-skip")
 	}
 }
