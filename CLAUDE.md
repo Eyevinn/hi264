@@ -44,12 +44,13 @@ encoder verification tests.
 - Efficient multi-frame sequences: IDR at configurable intervals, P_Skip between
 - ~76% bitstream size reduction vs all-IDR for repeated frames
 - Fragmented MP4 (fMP4/CMAF) output with configurable framerate and fragment duration
-- Tiling background pattern from `.gridimg` files (`-f` with `-w`/`-h`)
+- Tiling background pattern from `.gridimg` files (`-gi` with `-w`/`-h`)
 - Text overlay with format patterns (`-text "%03d"`, `"%mm:%ss.%ff"`, etc.)
 - Auto-scaling text (`-text-scale 0`) to fill available frame space
 - Text background box (`-text-bg R,G,B`) for readability over busy patterns
 - Built-in 75% SMPTE color bars pattern (`-smpte`)
 - Filler NAL padding (`-bpp`) for fixed bytes-per-picture / CBR-like streams
+- Stdout output (`-o -`) with explicit format flag (`-f 264`, `-f mp4`, etc.)
 
 #### Color Space Support
 - BT.601 (SD, default), BT.709 (HD), BT.2020 (UHD) color spaces
@@ -92,13 +93,13 @@ go run ./cmd/hi264dec input.mp4 output.png
 go run ./cmd/hi264dec -n 5 input.mp4 frames.png # extract 5 IDR frames (frames_0000.png, ...)
 
 # Generate H.264 IDR frame from grid pattern (CAVLC, Baseline profile)
-go run ./cmd/hi264gen -f examples/sweden.gridimg -o sweden.264
+go run ./cmd/hi264gen -gi examples/sweden.gridimg -o sweden.264
 
 # Generate H.264 IDR frame with CABAC entropy coding (Main profile)
-go run ./cmd/hi264gen -f examples/sweden.gridimg -cabac -o sweden_cabac.264
+go run ./cmd/hi264gen -gi examples/sweden.gridimg -cabac -o sweden_cabac.264
 
 # Generate H.264 IDR frame from inline grid/colors
-go run ./cmd/hi264gen -grid "xy,yx" -c x=235,128,128 -c y=16,128,128 -o checker.264
+go run ./cmd/hi264gen -gp "xy,yx" -gc x=235,128,128 -gc y=16,128,128 -o checker.264
 
 # Generate multi-frame H.264 sequence with frame counter
 go run ./cmd/hi264gen -w 176 -h 80 -n 10 -text "%03d" -o counter.264
@@ -116,7 +117,7 @@ go run ./cmd/hi264gen -w 176 -h 80 -n 50 -text "%03d" -o counter.mp4
 go run ./cmd/hi264gen -w 320 -h 240 -n 75 -text "%03d" -fps 30 -frag-dur 30 -o counter.mp4
 
 # Generate sequence with tiled background pattern
-go run ./cmd/hi264gen -f examples/checker4x4.gridimg -w 176 -h 80 -n 10 -text "%03d" -o counter.264
+go run ./cmd/hi264gen -gi examples/checker4x4.gridimg -w 176 -h 80 -n 10 -text "%03d" -o counter.264
 
 # SMPTE color bars with counter overlay
 go run ./cmd/hi264gen -smpte -w 176 -h 80 -n 10 -text "%03d" -o smpte.264
@@ -131,26 +132,30 @@ go run ./cmd/hi264gen -smpte -w 512 -h 240 -n 75 -fps 25 -text "%mm:%ss.%ff" -o 
 go run ./cmd/hi264gen -smpte -w 176 -h 80 -bpp 5000 -o padded.264
 go run ./cmd/hi264gen -w 320 -h 240 -n 50 -text "%03d" -bpp 8000 -o cbr_counter.mp4
 
+# Pipe to stdout (requires -f to specify format)
+go run ./cmd/hi264gen -smpte -w 320 -h 240 -n 100 -text "%03d" -f 264 -o - | ffplay -i -
+go run ./cmd/hi264gen -smpte -w 320 -h 240 -n 100 -text "%03d" -f mp4 -o - | ffplay -i -
+
 # Generate reference image from grid pattern (raw, no H.264 encoding)
-go run ./cmd/hi264gen -f examples/sweden.gridimg -o expected.png
+go run ./cmd/hi264gen -gi examples/sweden.gridimg -o expected.png
 
 # Generate tiled pattern with custom dimensions
-go run ./cmd/hi264gen -f examples/checker4x4.gridimg -w 176 -h 80 -o tiled.png
+go run ./cmd/hi264gen -gi examples/checker4x4.gridimg -w 176 -h 80 -o tiled.png
 
 # Generate multi-frame with counter
-go run ./cmd/hi264gen -f examples/checker4x4.gridimg -w 176 -h 80 -n 5 -text "%03d" -o counter.png
+go run ./cmd/hi264gen -gi examples/checker4x4.gridimg -w 176 -h 80 -n 5 -text "%03d" -o counter.png
 
 # SMPTE bars reference image
 go run ./cmd/hi264gen -smpte -w 176 -h 80 -o smpte.png
 
 # Raw YUV output
-go run ./cmd/hi264gen -f examples/sweden.gridimg -o sweden.yuv
+go run ./cmd/hi264gen -gi examples/sweden.gridimg -o sweden.yuv
 
 # JPEG output
-go run ./cmd/hi264gen -f examples/sweden.gridimg -q 95 -o sweden.jpg
+go run ./cmd/hi264gen -gi examples/sweden.gridimg -q 95 -o sweden.jpg
 
 # Color space: generate BT.709 stream with VUI signaling
-go run ./cmd/hi264gen -f examples/sweden.gridimg -colorspace bt709 -o sweden_709.264
+go run ./cmd/hi264gen -gi examples/sweden.gridimg -colorspace bt709 -o sweden_709.264
 
 # Full-range BT.709
 go run ./cmd/hi264gen -smpte -w 320 -h 240 -colorspace bt709 -full-range -o smpte_709.264

@@ -32,7 +32,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `pkg/yuv.ParseColorSpace()`, `ColorSpaceFromMatrixCoefficients()` helpers
 - `pkg/yuv.SolidGrid()` helper for creating uniform single-color grids from pixel dimensions
 - `-idr-and-skip` flag for hi264dec to opt in to P_Skip frame decoding (IDR-only by default)
-- hi264gen CLI validation error tests and `-smpte`/`-f` mutual exclusivity test
+- hi264gen CLI validation error tests and `-smpte`/`-gi` mutual exclusivity test
+- Stdout output (`-o -`) for piping into tools like ffplay
+- `-f` flag for explicit output format (`264`, `mp4`, `y4m`, `yuv`, `png`, `jpg`); required with `-o -`
+- Status messages (`Wrote N frames...`) now go to stderr, keeping stdout clean for piped data
 
 ### Fixed
 - `tools/verify_hi264gen.sh` now accounts for hi264dec's `_WxH_yuv420p` YUV output suffix
@@ -41,6 +44,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Breaking:** `-digits`, `-digit-scale`, `-digit-bg` flags replaced by `-text`, `-text-scale`, `-text-bg`
   - Migration: `-digits 3` → `-text "%03d"`, `-digit-scale 3` → `-text-scale 3`, `-digit-bg R,G,B` → `-text-bg R,G,B`
 - hi264dec now decodes only IDR frames by default, matching expected behavior for real-world MP4 files
+- **Breaking:** hi264gen flag renames: `-f` → `-gi` (grid image), `-grid` → `-gp` (grid pattern), `-c` → `-gc` (grid color)
+  - Migration: `-f pattern.gridimg` → `-gi pattern.gridimg`, `-grid "xy,yx"` → `-gp "xy,yx"`, `-c x=235,128,128` → `-gc x=235,128,128`
+  - `-f` is now the output format flag (e.g. `-f 264`, `-f mp4`)
 
 ## [0.8.0] - 2025-02-15
 

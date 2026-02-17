@@ -68,16 +68,18 @@ grid maps to one 16x16 macroblock filled with a single flat color, encoded as
 I_16x16 with DC prediction. This is not a general-purpose encoder — it produces
 test content from color patterns, not from arbitrary video frames.
 
-Output formats:
+Output format is auto-detected from the file extension, or set explicitly with `-f`:
 
-| Extension | Format | Notes |
+| Extension / `-f` | Format | Notes |
 |---|---|---|
-| `.264` | Annex-B | Raw H.264 bitstream |
-| `.mp4` | Fragmented MP4 | fMP4/CMAF with configurable fps and fragment duration |
-| `.y4m` | Y4M | YUV4MPEG2 container |
-| `.yuv` | Raw YUV | 4:2:0 planar (auto-adds `_WxH_yuv420p` suffix) |
-| `.png` | PNG | Raw grid output (no H.264 encoding) |
-| `.jpg` | JPEG | Raw grid output (`-q` for quality, default 85) |
+| `.264` / `264` | Annex-B | Raw H.264 bitstream |
+| `.mp4` / `mp4` | Fragmented MP4 | fMP4/CMAF with configurable fps and fragment duration |
+| `.y4m` / `y4m` | Y4M | YUV4MPEG2 container |
+| `.yuv` / `yuv` | Raw YUV | 4:2:0 planar (auto-adds `_WxH_yuv420p` suffix) |
+| `.png` / `png` | PNG | Raw grid output (no H.264 encoding) |
+| `.jpg` / `jpg` | JPEG | Raw grid output (`-q` for quality, default 85) |
+
+Use `-o -` to write to stdout (requires `-f` to set the format).
 
 For H.264 output, supports both CAVLC
 (Baseline profile) and CABAC (Main profile) entropy coding. Multi-frame
@@ -88,10 +90,10 @@ images for encode-decode chain verification.
 
 ```bash
 # Grid-only: single IDR frame from grid pattern (frame size = grid size)
-go run ./cmd/hi264gen -f examples/sweden.gridimg -o sweden.264
-go run ./cmd/hi264gen -f examples/sweden.gridimg -cabac -o sweden_cabac.264
-go run ./cmd/hi264gen -grid "xy,yx" -c x=235,128,128 -c y=16,128,128 -o checker.264
-go run ./cmd/hi264gen -grid "ab" -c a=255,0,0 -c b=0,0,255 -rgb -qp 20 -no-deblock -o test.264
+go run ./cmd/hi264gen -gi examples/sweden.gridimg -o sweden.264
+go run ./cmd/hi264gen -gi examples/sweden.gridimg -cabac -o sweden_cabac.264
+go run ./cmd/hi264gen -gp "xy,yx" -gc x=235,128,128 -gc y=16,128,128 -o checker.264
+go run ./cmd/hi264gen -gp "ab" -gc a=255,0,0 -gc b=0,0,255 -rgb -qp 20 -no-deblock -o test.264
 
 # Text overlay: frame counter on solid background
 go run ./cmd/hi264gen -w 176 -h 80 -n 10 -text "%03d" -o counter.264
@@ -112,7 +114,7 @@ go run ./cmd/hi264gen -w 176 -h 80 -n 50 -text "%03d" -o counter.mp4
 go run ./cmd/hi264gen -w 320 -h 240 -n 75 -text "%03d" -fps 30 -frag-dur 30 -o counter.mp4
 
 # Tiled: grid pattern tiled to fill custom dimensions, with optional text overlay
-go run ./cmd/hi264gen -f examples/checker4x4.gridimg -w 176 -h 80 -n 10 -text "%03d" -o counter.264
+go run ./cmd/hi264gen -gi examples/checker4x4.gridimg -w 176 -h 80 -n 10 -text "%03d" -o counter.264
 
 # SMPTE color bars with counter overlay
 go run ./cmd/hi264gen -smpte -w 176 -h 80 -n 10 -text "%03d" -o smpte.264
@@ -130,17 +132,21 @@ go run ./cmd/hi264gen -w 320 -h 240 -n 50 -text "%03d" -bpp 8000 -o cbr_counter.
 # Target bitrate instead of bytes per picture (-kbps converts to bpp using -fps)
 go run ./cmd/hi264gen -w 320 -h 240 -n 50 -text "%03d" -kbps 1000 -o cbr_counter.mp4
 
+# Pipe to stdout (requires -f to specify format)
+go run ./cmd/hi264gen -smpte -w 320 -h 240 -n 100 -text "%03d" -f 264 -o - | ffplay -i -
+go run ./cmd/hi264gen -smpte -w 320 -h 240 -n 100 -text "%03d" -f mp4 -o - | ffplay -i -
+
 # Raw image output (no H.264 encoding, useful as decoder reference)
-go run ./cmd/hi264gen -f examples/sweden.gridimg -o sweden.png
-go run ./cmd/hi264gen -f examples/sweden.gridimg -o sweden.yuv
-go run ./cmd/hi264gen -f examples/sweden.gridimg -q 95 -o sweden.jpg
+go run ./cmd/hi264gen -gi examples/sweden.gridimg -o sweden.png
+go run ./cmd/hi264gen -gi examples/sweden.gridimg -o sweden.yuv
+go run ./cmd/hi264gen -gi examples/sweden.gridimg -q 95 -o sweden.jpg
 go run ./cmd/hi264gen -w 176 -h 80 -n 5 -text "%03d" -o output.y4m
 go run ./cmd/hi264gen -w 176 -h 80 -n 5 -text "%03d" -o frame_%03d.png
 ```
 
 ```bash
 # Color space: generate BT.709 stream (VUI signaled in SPS)
-go run ./cmd/hi264gen -f examples/sweden.gridimg -colorspace bt709 -o sweden_709.264
+go run ./cmd/hi264gen -gi examples/sweden.gridimg -colorspace bt709 -o sweden_709.264
 
 # Full-range BT.709
 go run ./cmd/hi264gen -smpte -w 320 -h 240 -colorspace bt709 -full-range -o smpte_709.264
@@ -150,10 +156,11 @@ Flags:
 
 | Flag | Description | Default |
 |---|---|---|
-| `-f` | Grid image file (`.gridimg`) | — |
-| `-grid` | Inline grid string (e.g. `"xy,yx"`) | — |
-| `-c` | Color mapping (repeatable, e.g. `x=235,128,128`) | — |
-| `-rgb` | Treat `-c` values as RGB instead of YCbCr | off |
+| `-gi` | Grid image file (`.gridimg`) | — |
+| `-gp` | Inline grid pattern (e.g. `"xy,yx"`) | — |
+| `-gc` | Grid color mapping (repeatable, e.g. `x=235,128,128` YCbCr or RGB with `-rgb`) | — |
+| `-f` | Output format (`264`, `mp4`, `y4m`, `yuv`, `png`, `jpg`); required with `-o -` | auto-detect |
+| `-rgb` | Treat `-gc` values as RGB instead of YCbCr | off |
 | `-smpte` | Use built-in 75% SMPTE color bars pattern | off |
 | `-w` | Frame width in pixels | grid width |
 | `-h` | Frame height in pixels | grid height |
@@ -174,7 +181,7 @@ Flags:
 | `-full-range` | Full-range YCbCr (0-255) | off (limited) |
 | `-fps` | MP4 framerate | 25 |
 | `-frag-dur` | MP4 fragment duration in frames | 25 |
-| `-o` | Output file | — |
+| `-o` | Output file (`-` for stdout) | — |
 
 ### Constant bitrate testing with `-bpp` / `-kbps`
 
@@ -251,13 +258,13 @@ The `examples/` directory contains several `.gridimg` files:
 
 ```bash
 # Encode to H.264
-go run ./cmd/hi264gen -f examples/sweden.gridimg -o sweden.264
+go run ./cmd/hi264gen -gi examples/sweden.gridimg -o sweden.264
 
 # Decode to PNG
 go run ./cmd/hi264dec sweden.264 sweden.png
 
 # Generate reference PNG for comparison (raw output, no H.264)
-go run ./cmd/hi264gen -f examples/sweden.gridimg -o expected.png
+go run ./cmd/hi264gen -gi examples/sweden.gridimg -o expected.png
 
 # Cross-verify with FFmpeg (raw YUV)
 go run ./cmd/hi264dec sweden.264 sweden.yuv
