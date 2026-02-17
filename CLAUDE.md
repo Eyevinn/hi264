@@ -45,8 +45,9 @@ encoder verification tests.
 - ~76% bitstream size reduction vs all-IDR for repeated frames
 - Fragmented MP4 (fMP4/CMAF) output with configurable framerate and fragment duration
 - Tiling background pattern from `.gridimg` files (`-f` with `-w`/`-h`)
-- Auto-scaling digits (`-digit-scale 0`) to fill available frame space
-- Digit background box (`-digit-bg R,G,B`) for readability over busy patterns
+- Text overlay with format patterns (`-text "%03d"`, `"%mm:%ss.%ff"`, etc.)
+- Auto-scaling text (`-text-scale 0`) to fill available frame space
+- Text background box (`-text-bg R,G,B`) for readability over busy patterns
 - Built-in 75% SMPTE color bars pattern (`-smpte`)
 - Filler NAL padding (`-bpp`) for fixed bytes-per-picture / CBR-like streams
 
@@ -100,32 +101,35 @@ go run ./cmd/hi264gen -f examples/sweden.gridimg -cabac -o sweden_cabac.264
 go run ./cmd/hi264gen -grid "xy,yx" -c x=235,128,128 -c y=16,128,128 -o checker.264
 
 # Generate multi-frame H.264 sequence with frame counter
-go run ./cmd/hi264gen -w 176 -h 80 -n 10 -digits 3 -o counter.264
+go run ./cmd/hi264gen -w 176 -h 80 -n 10 -text "%03d" -o counter.264
 
 # Generate sequence with P_Skip frames (IDR every 50 frames, P_Skip between, CAVLC)
-go run ./cmd/hi264gen -w 1280 -h 720 -n 121 -digits 3 -idr-interval 50 -o counter.264
+go run ./cmd/hi264gen -w 1280 -h 720 -n 121 -text "%03d" -idr-interval 50 -o counter.264
 
 # With CABAC P_Skip frames (Main profile)
-go run ./cmd/hi264gen -w 1280 -h 720 -n 121 -digits 3 -cabac -idr-interval 50 -o counter.264
+go run ./cmd/hi264gen -w 1280 -h 720 -n 121 -text "%03d" -cabac -idr-interval 50 -o counter.264
 
 # Generate fragmented MP4 (25 fps, fragment every 25 frames)
-go run ./cmd/hi264gen -w 176 -h 80 -n 50 -digits 3 -o counter.mp4
+go run ./cmd/hi264gen -w 176 -h 80 -n 50 -text "%03d" -o counter.mp4
 
 # Generate MP4 with custom framerate and fragment duration
-go run ./cmd/hi264gen -w 320 -h 240 -n 75 -digits 3 -fps 30 -frag-dur 30 -o counter.mp4
+go run ./cmd/hi264gen -w 320 -h 240 -n 75 -text "%03d" -fps 30 -frag-dur 30 -o counter.mp4
 
 # Generate sequence with tiled background pattern
-go run ./cmd/hi264gen -f examples/checker4x4.gridimg -w 176 -h 80 -n 10 -digits 3 -o counter.264
+go run ./cmd/hi264gen -f examples/checker4x4.gridimg -w 176 -h 80 -n 10 -text "%03d" -o counter.264
 
 # SMPTE color bars with counter overlay
-go run ./cmd/hi264gen -smpte -w 176 -h 80 -n 10 -digits 3 -o smpte.264
+go run ./cmd/hi264gen -smpte -w 176 -h 80 -n 10 -text "%03d" -o smpte.264
 
-# SMPTE bars with digit background box and explicit scale
-go run ./cmd/hi264gen -smpte -w 352 -h 288 -n 1 -digits 2 -digit-scale 3 -digit-bg 0,0,0 -o smpte_big.264
+# SMPTE bars with text background box and explicit scale
+go run ./cmd/hi264gen -smpte -w 352 -h 288 -n 1 -text "%02d" -text-scale 3 -text-bg 0,0,0 -o smpte_big.264
+
+# Timestamp overlay
+go run ./cmd/hi264gen -smpte -w 512 -h 240 -n 75 -fps 25 -text "%mm:%ss.%ff" -o timestamp.264
 
 # Fixed bytes per picture (pad with filler NALUs for CBR-like streams)
 go run ./cmd/hi264gen -smpte -w 176 -h 80 -bpp 5000 -o padded.264
-go run ./cmd/hi264gen -w 320 -h 240 -n 50 -digits 3 -bpp 8000 -o cbr_counter.mp4
+go run ./cmd/hi264gen -w 320 -h 240 -n 50 -text "%03d" -bpp 8000 -o cbr_counter.mp4
 
 # Generate reference image from grid pattern (raw, no H.264 encoding)
 go run ./cmd/hi264gen -f examples/sweden.gridimg -o expected.png
@@ -134,7 +138,7 @@ go run ./cmd/hi264gen -f examples/sweden.gridimg -o expected.png
 go run ./cmd/hi264gen -f examples/checker4x4.gridimg -w 176 -h 80 -o tiled.png
 
 # Generate multi-frame with counter
-go run ./cmd/hi264gen -f examples/checker4x4.gridimg -w 176 -h 80 -n 5 -digits 3 -o counter.png
+go run ./cmd/hi264gen -f examples/checker4x4.gridimg -w 176 -h 80 -n 5 -text "%03d" -o counter.png
 
 # SMPTE bars reference image
 go run ./cmd/hi264gen -smpte -w 176 -h 80 -o smpte.png

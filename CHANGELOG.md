@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Text overlay with format patterns (`-text`) replacing digit-only `-digits` flag
+  - `%d` / `%03d` for frame numbers, `%hh:%mm:%ss.%ff` for timecodes, `%ms` for milliseconds
+  - Supports arbitrary text mixed with specifiers (e.g. `-text "Frame %03d"`)
+- `-text-scale` and `-text-bg` flags (replacing `-digit-scale` and `-digit-bg`)
+- `pkg/yuv.FormatText()` for expanding format patterns with frame number and fps
+- `pkg/yuv.TextGrid()` and `pkg/yuv.AutoTextScale()` for general text rendering
+- Full ASCII glyph set (A-Z, a-z, punctuation) in `pkg/yuv/font.go`
 - Adaptive intra prediction mode selection for I_16x16 encoder: selects best of Vertical, Horizontal, or DC mode per macroblock based on neighbor similarity, achieving zero residual when a neighbor matches the target color (71% CAVLC / 64% CABAC bitstream size reduction on `sweden.gridimg`)
 - Flexible color space support: BT.601 (default), BT.709, and BT.2020
 - Full-range and limited-range YCbCr conversion
@@ -26,8 +33,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - `tools/verify_hi264gen.sh` now accounts for hi264dec's `_WxH_yuv420p` YUV output suffix
 
-
 ### Changed
+- **Breaking:** `-digits`, `-digit-scale`, `-digit-bg` flags replaced by `-text`, `-text-scale`, `-text-bg`
+  - Migration: `-digits 3` → `-text "%03d"`, `-digit-scale 3` → `-text-scale 3`, `-digit-bg R,G,B` → `-text-bg R,G,B`
 - hi264dec now decodes only IDR frames by default, matching expected behavior for real-world MP4 files
 
 ## [0.8.0] - 2025-02-15
