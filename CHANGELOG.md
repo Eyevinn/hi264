@@ -9,12 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - Text overlay with format patterns (`-text`) replacing digit-only `-digits` flag
-  - `%d` / `%03d` for frame numbers, `%hh:%mm:%ss.%ff` for timecodes, `%ms` for milliseconds
+  - `%d` / `%03d` / `%3d` for frame numbers (no padding, zero-padded, space-padded)
+  - `%hh:%mm:%ss.%ff` for timecodes, `%ms` for milliseconds
+  - Multi-line text via `\n` (e.g. `-text '%03d\n%mm:%ss'`), lines centered independently
   - Supports arbitrary text mixed with specifiers (e.g. `-text "Frame %03d"`)
 - `-text-scale` and `-text-bg` flags (replacing `-digit-scale` and `-digit-bg`)
 - `pkg/yuv.FormatText()` for expanding format patterns with frame number and fps
 - `pkg/yuv.TextGrid()` and `pkg/yuv.AutoTextScale()` for general text rendering
+- `pkg/yuv.TextHeight()` for multi-line text height calculation
 - Full ASCII glyph set (A-Z, a-z, punctuation) in `pkg/yuv/font.go`
+- `-kbps` flag for specifying target bitrate in kbit/s (converted to bytes per picture using `-fps`; mutually exclusive with `-bpp`)
 - Adaptive intra prediction mode selection for I_16x16 encoder: selects best of Vertical, Horizontal, or DC mode per macroblock based on neighbor similarity, achieving zero residual when a neighbor matches the target color (71% CAVLC / 64% CABAC bitstream size reduction on `sweden.gridimg`)
 - Flexible color space support: BT.601 (default), BT.709, and BT.2020
 - Full-range and limited-range YCbCr conversion

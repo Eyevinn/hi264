@@ -15,6 +15,8 @@ func TestFormatText(t *testing.T) {
 		{"zero-padded %03d", "%03d", 5, 25, "005"},
 		{"zero-padded %04d", "%04d", 123, 25, "0123"},
 		{"%d no pad", "%d", 0, 25, "0"},
+		{"space-padded %3d", "%3d", 5, 25, "  5"},
+		{"space-padded %5d", "%5d", 42, 25, "   42"},
 
 		// Timestamp specifiers at 25fps
 		{"hours", "%hh", 90000, 25, "01"},          // 90000/25=3600s = 1h
