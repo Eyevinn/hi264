@@ -3,6 +3,7 @@ package yuv
 import (
 	"fmt"
 	"maps"
+	"strings"
 )
 
 // Glyph is a 3-wide × 5-tall bitmap. [row][col], true = foreground.
@@ -150,29 +151,58 @@ func HasGlyph(ch byte) bool {
 	return ok
 }
 
-// TextWidth returns the width in MBs at scale 1: 4*len(text)-1 for non-empty text, 0 for empty.
-func TextWidth(text string) int {
-	if len(text) == 0 {
+// textLines splits text on newlines and returns the lines.
+func textLines(text string) []string {
+	return strings.Split(text, "\n")
+}
+
+// lineWidth returns the width in MBs at scale 1 for a single line: 4*len-1, or 0 for empty.
+func lineWidth(line string) int {
+	if len(line) == 0 {
 		return 0
 	}
-	return 4*len(text) - 1
+	return 4*len(line) - 1
+}
+
+// TextWidth returns the width in MBs at scale 1 for the widest line.
+// For multi-line text (containing \n), returns the width of the longest line.
+func TextWidth(text string) int {
+	w := 0
+	for _, line := range textLines(text) {
+		if lw := lineWidth(line); lw > w {
+			w = lw
+		}
+	}
+	return w
+}
+
+// TextHeight returns the height in MBs at scale 1.
+// Single line = 5. Each additional line adds 6 (1 gap row + 5 glyph rows).
+func TextHeight(text string) int {
+	lines := textLines(text)
+	n := len(lines)
+	if n == 0 {
+		return 0
+	}
+	return 5*n + (n - 1)
 }
 
 // AutoTextScale returns the largest integer scale S where the scaled text
 // plus a 1-MB border fits within the given frame dimensions.
-// Text area at scale S: width = S*TextWidth(text), height = 5*S.
+// Text area at scale S: width = S*TextWidth(text), height = S*TextHeight(text).
 // With border: width+2, height+2 must fit within mbWidth, mbHeight.
 // Returns at least 1.
 func AutoTextScale(text string, mbWidth, mbHeight int) int {
 	tw := TextWidth(text)
-	if tw == 0 {
+	th := TextHeight(text)
+	if tw == 0 || th == 0 {
 		return 1
 	}
 	s := 1
 	for {
 		next := s + 1
 		w := next*tw + 2
-		h := 5*next + 2
+		h := next*th + 2
 		if w > mbWidth || h > mbHeight {
 			break
 		}
@@ -184,10 +214,13 @@ func AutoTextScale(text string, mbWidth, mbHeight int) int {
 // renderText stamps glyph pixels onto chars, centered in mbWidth×mbHeight.
 // Writes '#' for foreground glyph pixels. If textBg is true, first draws
 // a 1-MB-border '@' box behind the text area.
+// Multi-line text (containing \n) renders each line centered horizontally
+// within the overall text block, with a 1-row gap between lines.
 func renderText(chars [][]byte, mbWidth, mbHeight int, text string, scale int, textBg bool) {
 	tw := TextWidth(text)
+	th := TextHeight(text)
 	textAreaWidth := scale * tw
-	textAreaHeight := 5 * scale
+	textAreaHeight := scale * th
 
 	offsetX := (mbWidth - textAreaWidth) / 2
 	offsetY := (mbHeight - textAreaHeight) / 2
@@ -207,24 +240,32 @@ func renderText(chars [][]byte, mbWidth, mbHeight int, text string, scale int, t
 		}
 	}
 
-	// Draw glyph pixels (scaled)
-	for i := 0; i < len(text); i++ {
-		g, ok := glyphs[text[i]]
-		if !ok {
-			continue // unsupported → space (no pixels)
-		}
-		dx := offsetX + i*4*scale
-		for row := range 5 {
-			for col := range 3 {
-				if g[row][col] {
-					for sy := range scale {
-						for sx := range scale {
-							chars[offsetY+row*scale+sy][dx+col*scale+sx] = '#'
+	// Draw glyph pixels (scaled), line by line
+	lines := textLines(text)
+	lineY := offsetY
+	for _, line := range lines {
+		lw := lineWidth(line)
+		// Center this line horizontally within the text area
+		lineOffsetX := offsetX + (textAreaWidth-scale*lw)/2
+		for i := 0; i < len(line); i++ {
+			g, ok := glyphs[line[i]]
+			if !ok {
+				continue
+			}
+			dx := lineOffsetX + i*4*scale
+			for row := range 5 {
+				for col := range 3 {
+					if g[row][col] {
+						for sy := range scale {
+							for sx := range scale {
+								chars[lineY+row*scale+sy][dx+col*scale+sx] = '#'
+							}
 						}
 					}
 				}
 			}
 		}
+		lineY += 6 * scale // 5 glyph rows + 1 gap row, all scaled
 	}
 }
 
@@ -234,8 +275,9 @@ func TextGrid(text string, mbWidth, mbHeight, scale int,
 	bg, fg Color, textBg *Color) (*Grid, ColorMap, error) {
 
 	tw := TextWidth(text)
+	th := TextHeight(text)
 	textAreaWidth := scale * tw
-	textAreaHeight := 5 * scale
+	textAreaHeight := scale * th
 
 	if textAreaWidth > mbWidth || textAreaHeight > mbHeight {
 		return nil, nil, fmt.Errorf("frame %dx%d MBs too small for text %q at scale %d (need %dx%d)",
@@ -270,8 +312,9 @@ func OverlayText(grid *Grid, colors ColorMap, text string, scale int,
 	fg Color, textBg *Color) (*Grid, ColorMap, error) {
 
 	tw := TextWidth(text)
+	th := TextHeight(text)
 	textAreaWidth := scale * tw
-	textAreaHeight := 5 * scale
+	textAreaHeight := scale * th
 
 	if textAreaWidth > grid.Width || textAreaHeight > grid.Height {
 		return nil, nil, fmt.Errorf("frame %dx%d MBs too small for text %q at scale %d (need %dx%d)",

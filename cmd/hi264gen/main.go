@@ -84,6 +84,7 @@ type options struct {
 	noDeblock   bool
 	idrInterval int
 	bpp         int
+	kbps        int
 	jpegQual    int
 	fps         int
 	fragDur     int
@@ -113,6 +114,7 @@ func parseOptions(fs *flag.FlagSet, args []string) (*options, error) {
 	fs.BoolVar(&opts.noDeblock, "no-deblock", false, "disable deblocking filter")
 	fs.IntVar(&opts.idrInterval, "idr-interval", 0, "frames between IDR frames (0 = every frame is IDR)")
 	fs.IntVar(&opts.bpp, "bpp", 0, "target bytes per picture (pad with filler NALUs)")
+	fs.IntVar(&opts.kbps, "kbps", 0, "target bitrate in kbit/s (converted to bytes per picture using -fps)")
 	fs.IntVar(&opts.jpegQual, "q", 85, "JPEG quality (1-100)")
 	fs.IntVar(&opts.fps, "fps", 25, "framerate for MP4 and timestamp specifiers")
 	fs.IntVar(&opts.fragDur, "frag-dur", 25, "fragment duration in frames for MP4 output")
@@ -167,6 +169,9 @@ func run(args []string) error {
 		fmt.Printf("%s %s\n", appName, internal.GetVersion())
 		return nil
 	}
+
+	// Convert literal \n sequences to newlines in text pattern.
+	opts.text = strings.ReplaceAll(opts.text, `\n`, "\n")
 
 	if opts.output == "" {
 		fs.Usage()
@@ -258,8 +263,17 @@ func run(args []string) error {
 	if opts.bpp < 0 {
 		return fmt.Errorf("bpp must be non-negative, got %d", opts.bpp)
 	}
+	if opts.kbps < 0 {
+		return fmt.Errorf("kbps must be non-negative, got %d", opts.kbps)
+	}
+	if opts.bpp > 0 && opts.kbps > 0 {
+		return fmt.Errorf("-bpp and -kbps are mutually exclusive")
+	}
 	if opts.fps <= 0 {
 		return fmt.Errorf("fps must be positive, got %d", opts.fps)
+	}
+	if opts.kbps > 0 {
+		opts.bpp = opts.kbps * 1000 / 8 / opts.fps
 	}
 	if opts.fragDur <= 0 {
 		return fmt.Errorf("frag-dur must be positive, got %d", opts.fragDur)

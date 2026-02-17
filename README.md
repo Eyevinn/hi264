@@ -120,9 +120,15 @@ go run ./cmd/hi264gen -smpte -w 176 -h 80 -n 10 -text "%03d" -o smpte.264
 # SMPTE bars with text background box and explicit scale
 go run ./cmd/hi264gen -smpte -w 352 -h 288 -n 1 -text "%02d" -text-scale 3 -text-bg 0,0,0 -o smpte_big.264
 
+# Multi-line text overlay (use \n to separate lines)
+go run ./cmd/hi264gen -smpte -w 320 -h 240 -n 75 -fps 25 -text '%03d\n%mm:%ss.%ff' -o multiline.mp4
+
 # Fixed bytes per picture (pad with H.264 filler NALUs for CBR-like streams)
 go run ./cmd/hi264gen -smpte -w 176 -h 80 -bpp 5000 -o padded.264
 go run ./cmd/hi264gen -w 320 -h 240 -n 50 -text "%03d" -bpp 8000 -o cbr_counter.mp4
+
+# Target bitrate instead of bytes per picture (-kbps converts to bpp using -fps)
+go run ./cmd/hi264gen -w 320 -h 240 -n 50 -text "%03d" -kbps 1000 -o cbr_counter.mp4
 
 # Raw image output (no H.264 encoding, useful as decoder reference)
 go run ./cmd/hi264gen -f examples/sweden.gridimg -o sweden.png
@@ -152,7 +158,7 @@ Flags:
 | `-w` | Frame width in pixels | grid width |
 | `-h` | Frame height in pixels | grid height |
 | `-n` | Number of frames | 1 |
-| `-text` | Text overlay pattern (e.g. `"%03d"`, `"%mm:%ss.%ff"`) | — |
+| `-text` | Text overlay pattern (e.g. `"%03d"`, `"%mm:%ss.%ff"`, `\n` for newlines) | — |
 | `-text-scale` | Text scale factor (0 = auto-fit) | 0 |
 | `-text-bg` | Text background box color (R,G,B) | none |
 | `-fg` | Foreground color (R,G,B) | — |
@@ -163,22 +169,27 @@ Flags:
 | `-q` | JPEG quality | 85 |
 | `-idr-interval` | Frames between IDR keyframes (0 = all-IDR) | 0 |
 | `-bpp` | Bytes per picture (filler NAL padding) | 0 (off) |
+| `-kbps` | Target bitrate in kbit/s (converted to bpp using `-fps`) | 0 (off) |
 | `-colorspace` | Color space (`bt601`/`bt709`/`bt2020`) | `bt601` |
 | `-full-range` | Full-range YCbCr (0-255) | off (limited) |
 | `-fps` | MP4 framerate | 25 |
 | `-frag-dur` | MP4 fragment duration in frames | 25 |
 | `-o` | Output file | — |
 
-### Constant bitrate testing with `-bpp`
+### Constant bitrate testing with `-bpp` / `-kbps`
 
 The `-bpp` flag pads each picture to an exact byte count using H.264 filler data
 NAL units (NAL type 12, per spec section 7.3.2.7). This is useful for testing
 bitrate-sensitive scenarios such as ABR ladder switching, buffer management, and
 segment size constraints.
 
+Alternatively, use `-kbps` to specify the target bitrate directly in kbit/s — it
+is converted to bytes per picture using the current `-fps` value:
+`bpp = kbps * 1000 / 8 / fps`. The two flags are mutually exclusive.
+
 The target bitrate in kbit/s is: `bpp * 8 * fps / 1000`. For example, `-bpp 5000`
-at 25 fps gives 1000 kbit/s. An error is returned if a frame's encoded slice
-already exceeds the target (use a higher QP or larger `-bpp` value).
+at 25 fps gives 1000 kbit/s (equivalent to `-kbps 1000`). An error is returned if
+a frame's encoded slice already exceeds the target (use a higher QP or larger value).
 
 A practical pattern is to use different background colors or patterns for
 different bitrate tiers so the current quality level is visually obvious during
@@ -186,13 +197,13 @@ playback:
 
 ```bash
 # 500 kbit/s tier — green background
-go run ./cmd/hi264gen -w 320 -h 240 -n 50 -text "%03d" -bg 0,128,0 -bpp 2500 -o low.mp4
+go run ./cmd/hi264gen -w 320 -h 240 -n 50 -text "%03d" -bg 0,128,0 -kbps 500 -o low.mp4
 
 # 1500 kbit/s tier — blue background
-go run ./cmd/hi264gen -w 640 -h 360 -n 50 -text "%03d" -bg 0,0,200 -bpp 7500 -o mid.mp4
+go run ./cmd/hi264gen -w 640 -h 360 -n 50 -text "%03d" -bg 0,0,200 -kbps 1500 -o mid.mp4
 
 # 3000 kbit/s tier — red background
-go run ./cmd/hi264gen -w 1280 -h 720 -n 50 -text "%03d" -bg 200,0,0 -bpp 15000 -o high.mp4
+go run ./cmd/hi264gen -w 1280 -h 720 -n 50 -text "%03d" -bg 200,0,0 -kbps 3000 -o high.mp4
 ```
 
 This makes it easy to verify that an ABR player switches between the correct

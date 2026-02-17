@@ -97,6 +97,44 @@ func TestTextWidth(t *testing.T) {
 	}
 }
 
+func TestTextWidthMultiLine(t *testing.T) {
+	tests := []struct {
+		text string
+		want int
+	}{
+		{"A\nBC", 7},         // max("A"=3, "BC"=7) = 7
+		{"AB\nC", 7},         // max("AB"=7, "C"=3) = 7
+		{"AB\nCD\nE", 7},     // max(7, 7, 3) = 7
+		{"\n", 0},            // two empty lines
+		{"A\n", 3},           // "A" + empty line
+		{"hello\nworld", 19}, // both 5 chars = 19
+	}
+	for _, tc := range tests {
+		got := TextWidth(tc.text)
+		if got != tc.want {
+			t.Errorf("TextWidth(%q) = %d, want %d", tc.text, got, tc.want)
+		}
+	}
+}
+
+func TestTextHeight(t *testing.T) {
+	tests := []struct {
+		text string
+		want int
+	}{
+		{"A", 5},        // 1 line: 5
+		{"A\nB", 11},    // 2 lines: 5+1+5
+		{"A\nB\nC", 17}, // 3 lines: 5+1+5+1+5
+		{"", 5},         // "" splits to [""], 1 line
+	}
+	for _, tc := range tests {
+		got := TextHeight(tc.text)
+		if got != tc.want {
+			t.Errorf("TextHeight(%q) = %d, want %d", tc.text, got, tc.want)
+		}
+	}
+}
+
 func TestAutoTextScale(t *testing.T) {
 	tests := []struct {
 		text      string
@@ -116,6 +154,15 @@ func TestAutoTextScale(t *testing.T) {
 	}
 	// Recalculate "AB" case: tw=7, S=14: 7*14+2=100 ≤ 100, 5*14+2=72 ≤ 100. S=15: 7*15+2=107 > 100. So want 14.
 	tests[3].wantScale = 14
+
+	// Multi-line: "AB\nCD" → tw=7, th=11.
+	// S=1: 7+2=9<=100, 11+2=13<=100. S=8: 7*8+2=58<=100, 11*8+2=90<=100.
+	// S=9: 7*9+2=65<=100, 11*9+2=101>100. So want 8.
+	tests = append(tests, struct {
+		text      string
+		mbW, mbH  int
+		wantScale int
+	}{"AB\nCD", 100, 100, 8})
 
 	for _, tc := range tests {
 		got := AutoTextScale(tc.text, tc.mbW, tc.mbH)
@@ -156,6 +203,65 @@ func TestTextGrid(t *testing.T) {
 	_, _, err = TextGrid("hello", 10, 3, 1, bg, fg, nil)
 	if err == nil {
 		t.Error("expected error for frame too small")
+	}
+}
+
+func TestTextGridMultiLine(t *testing.T) {
+	bg := Color{16, 128, 128}
+	fg := Color{235, 128, 128}
+
+	// "A\nB" at scale 1: tw=3, th=11 (5+1+5). Need 3×11 minimum.
+	grid, _, err := TextGrid("A\nB", 5, 13, 1, bg, fg, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if grid.Width != 5 || grid.Height != 13 {
+		t.Errorf("grid size %dx%d, want 5x13", grid.Width, grid.Height)
+	}
+
+	// With 5×13 frame and 3×11 text area: offsetX=1, offsetY=1
+	// Line 1 ("A"): lineWidth=3, centered at offsetX + (3-3)/2 = 1
+	// A row 0: .#. → (1,1)='.', (2,1)='#', (3,1)='.'
+	if grid.Chars[1][2] != '#' {
+		t.Error("A top center should be '#'")
+	}
+
+	// Line 2 ("B") starts at lineY = 1 + 6 = 7
+	// B row 0: ##. → (1,7)='#', (2,7)='#', (3,7)='.'
+	if grid.Chars[7][1] != '#' || grid.Chars[7][2] != '#' {
+		t.Error("B top-left should be '##'")
+	}
+	if grid.Chars[7][3] != '.' {
+		t.Error("B top-right should be '.'")
+	}
+
+	// Gap row between lines (row 6 = offsetY + 5 = 6) should be background
+	if grid.Chars[6][1] != '.' || grid.Chars[6][2] != '.' {
+		t.Error("gap row should be background '.'")
+	}
+}
+
+func TestTextGridMultiLineCentering(t *testing.T) {
+	bg := Color{16, 128, 128}
+	fg := Color{235, 128, 128}
+
+	// "AB\nC" at scale 1: tw=7 (from "AB"), th=11.
+	// Line "AB" width=7, line "C" width=3.
+	// In a 9×13 frame: textArea 7×11, offsetX=1, offsetY=1
+	// "AB" is full width → lineOffsetX = 1 + (7-7)/2 = 1
+	// "C" is centered → lineOffsetX = 1 + (7-3)/2 = 3
+	grid, _, err := TextGrid("AB\nC", 9, 13, 1, bg, fg, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// "C" starts at row 7 (1 + 6*1), col 3
+	// C row 0: .## → (3,7)='.', (4,7)='#', (5,7)='#'
+	if grid.Chars[7][4] != '#' || grid.Chars[7][5] != '#' {
+		t.Error("C top should be '##' at cols 4-5")
+	}
+	if grid.Chars[7][3] != '.' {
+		t.Error("C top-left col should be '.'")
 	}
 }
 

@@ -743,6 +743,8 @@ func TestRunValidationErrors(t *testing.T) {
 		{"negative idr-interval",
 			b("-idr-interval", "-1"), "non-negative"},
 		{"negative bpp", b("-bpp", "-1"), "non-negative"},
+		{"negative kbps", b("-kbps", "-1"), "non-negative"},
+		{"bpp and kbps", b("-bpp", "5000", "-kbps", "1000"), "mutually exclusive"},
 		{"zero fps", b("-fps", "0"), "fps must be positive"},
 		{"zero frag-dur",
 			b("-frag-dur", "0"), "frag-dur must be positive"},
