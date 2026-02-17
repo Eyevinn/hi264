@@ -26,6 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - `tools/verify_hi264gen.sh` now accounts for hi264dec's `_WxH_yuv420p` YUV output suffix
 
+
 ### Changed
 - hi264dec now decodes only IDR frames by default, matching expected behavior for real-world MP4 files
 
