@@ -13,7 +13,7 @@ func TestRunH264Output(t *testing.T) {
 	dir := t.TempDir()
 	out := filepath.Join(dir, "test.264")
 
-	err := run([]string{appName, "-w", "176", "-h", "80", "-n", "3", "-digits", "3", "-o", out})
+	err := run([]string{appName, "-w", "176", "-h", "80", "-n", "3", "-text", "%03d", "-o", out})
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
@@ -39,7 +39,7 @@ func TestRunH264CABAC(t *testing.T) {
 	dir := t.TempDir()
 	out := filepath.Join(dir, "test_cabac.264")
 
-	err := run([]string{appName, "-w", "176", "-h", "80", "-n", "2", "-digits", "3", "-cabac", "-o", out})
+	err := run([]string{appName, "-w", "176", "-h", "80", "-n", "2", "-text", "%03d", "-cabac", "-o", out})
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
@@ -59,7 +59,7 @@ func TestRunY4MOutput(t *testing.T) {
 	dir := t.TempDir()
 	out := filepath.Join(dir, "test.y4m")
 
-	err := run([]string{appName, "-w", "176", "-h", "80", "-n", "3", "-digits", "3", "-o", out})
+	err := run([]string{appName, "-w", "176", "-h", "80", "-n", "3", "-text", "%03d", "-o", out})
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
@@ -85,7 +85,7 @@ func TestRunPNGOutput(t *testing.T) {
 	dir := t.TempDir()
 	pattern := filepath.Join(dir, "frame_%03d.png")
 
-	err := run([]string{appName, "-w", "48", "-h", "80", "-n", "2", "-digits", "1", "-o", pattern})
+	err := run([]string{appName, "-w", "48", "-h", "80", "-n", "2", "-text", "%d", "-o", pattern})
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
@@ -105,7 +105,7 @@ func TestRunPNGOutput(t *testing.T) {
 }
 
 func TestRunMissingOutput(t *testing.T) {
-	err := run([]string{appName, "-w", "176", "-h", "80", "-digits", "3"})
+	err := run([]string{appName, "-w", "176", "-h", "80", "-text", "%03d"})
 	if err == nil {
 		t.Error("expected error for missing -o")
 	}
@@ -115,7 +115,7 @@ func TestRunInvalidWidth(t *testing.T) {
 	dir := t.TempDir()
 	out := filepath.Join(dir, "test.264")
 
-	err := run([]string{appName, "-w", "101", "-h", "80", "-digits", "3", "-o", out})
+	err := run([]string{appName, "-w", "101", "-h", "80", "-text", "%03d", "-o", out})
 	if err == nil {
 		t.Error("expected error for odd width")
 	}
@@ -125,7 +125,7 @@ func TestRunNon16MultipleWidth(t *testing.T) {
 	dir := t.TempDir()
 	out := filepath.Join(dir, "test.264")
 
-	err := run([]string{appName, "-w", "100", "-h", "100", "-n", "2", "-digits", "1", "-o", out})
+	err := run([]string{appName, "-w", "100", "-h", "100", "-n", "2", "-text", "%d", "-o", out})
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
@@ -151,7 +151,7 @@ func TestRunY4MNon16Multiple(t *testing.T) {
 	dir := t.TempDir()
 	out := filepath.Join(dir, "test.y4m")
 
-	err := run([]string{appName, "-w", "100", "-h", "100", "-n", "2", "-digits", "1", "-o", out})
+	err := run([]string{appName, "-w", "100", "-h", "100", "-n", "2", "-text", "%d", "-o", out})
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
@@ -178,9 +178,9 @@ func TestRunFrameTooSmall(t *testing.T) {
 	out := filepath.Join(dir, "test.264")
 
 	// 3 digits needs 11x5 MBs = 176x80, but we give 48x80 (3 MBs wide)
-	err := run([]string{appName, "-w", "48", "-h", "80", "-digits", "3", "-o", out})
+	err := run([]string{appName, "-w", "48", "-h", "80", "-text", "%03d", "-o", out})
 	if err == nil {
-		t.Error("expected error for frame too small for digits")
+		t.Error("expected error for frame too small for text")
 	}
 }
 
@@ -189,7 +189,7 @@ func TestRunIDRInterval(t *testing.T) {
 	out := filepath.Join(dir, "test.264")
 
 	// 10 frames with IDR every 5: frames 0,5 are IDR, frames 1-4,6-9 are P_Skip
-	err := run([]string{appName, "-w", "176", "-h", "80", "-n", "10", "-digits", "3",
+	err := run([]string{appName, "-w", "176", "-h", "80", "-n", "10", "-text", "%03d",
 		"-idr-interval", "5", "-o", out})
 	if err != nil {
 		t.Fatalf("run: %v", err)
@@ -222,7 +222,7 @@ func TestRunIDRIntervalSmall(t *testing.T) {
 	out := filepath.Join(dir, "test.264")
 
 	// 3 frames with IDR every 3: frame 0 is IDR, frames 1-2 are P_Skip
-	err := run([]string{appName, "-w", "176", "-h", "80", "-n", "3", "-digits", "3",
+	err := run([]string{appName, "-w", "176", "-h", "80", "-n", "3", "-text", "%03d",
 		"-idr-interval", "3", "-o", out})
 	if err != nil {
 		t.Fatalf("run: %v", err)
@@ -246,7 +246,7 @@ func TestRunMP4Output(t *testing.T) {
 	dir := t.TempDir()
 	out := filepath.Join(dir, "test.mp4")
 
-	err := run([]string{appName, "-w", "176", "-h", "80", "-n", "3", "-digits", "3", "-o", out})
+	err := run([]string{appName, "-w", "176", "-h", "80", "-n", "3", "-text", "%03d", "-o", out})
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
@@ -266,7 +266,7 @@ func TestRunMP4WithPSkip(t *testing.T) {
 	dir := t.TempDir()
 	out := filepath.Join(dir, "test.mp4")
 
-	err := run([]string{appName, "-w", "176", "-h", "80", "-n", "10", "-digits", "3",
+	err := run([]string{appName, "-w", "176", "-h", "80", "-n", "10", "-text", "%03d",
 		"-idr-interval", "5", "-fps", "30", "-frag-dur", "5", "-o", out})
 	if err != nil {
 		t.Fatalf("run: %v", err)
@@ -305,7 +305,7 @@ func TestRunIDRIntervalCABAC(t *testing.T) {
 	dir := t.TempDir()
 	out := filepath.Join(dir, "test.264")
 
-	err := run([]string{appName, "-w", "176", "-h", "80", "-n", "5", "-digits", "3",
+	err := run([]string{appName, "-w", "176", "-h", "80", "-n", "5", "-text", "%03d",
 		"-cabac", "-idr-interval", "3", "-o", out})
 	if err != nil {
 		t.Fatalf("unexpected error for CABAC + idr-interval: %v", err)
@@ -342,7 +342,7 @@ func TestRunSMPTE(t *testing.T) {
 	dir := t.TempDir()
 	out := filepath.Join(dir, "smpte.264")
 
-	err := run([]string{appName, "-smpte", "-w", "176", "-h", "80", "-n", "2", "-digits", "3", "-o", out})
+	err := run([]string{appName, "-smpte", "-w", "176", "-h", "80", "-n", "2", "-text", "%03d", "-o", out})
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
@@ -366,18 +366,18 @@ func TestRunSMPTEExclusive(t *testing.T) {
 	out := filepath.Join(dir, "test.264")
 
 	// -smpte with -grid should error
-	err := run([]string{appName, "-smpte", "-grid", "xy", "-w", "176", "-h", "80", "-digits", "1", "-o", out})
+	err := run([]string{appName, "-smpte", "-grid", "xy", "-w", "176", "-h", "80", "-text", "%d", "-o", out})
 	if err == nil {
 		t.Error("expected error for -smpte with -grid")
 	}
 }
 
-func TestRunDigitBg(t *testing.T) {
+func TestRunTextBg(t *testing.T) {
 	dir := t.TempDir()
 	out := filepath.Join(dir, "test.264")
 
-	err := run([]string{appName, "-w", "176", "-h", "80", "-n", "1", "-digits", "3",
-		"-digit-bg", "128,128,128", "-o", out})
+	err := run([]string{appName, "-w", "176", "-h", "80", "-n", "1", "-text", "%03d",
+		"-text-bg", "128,128,128", "-o", out})
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
@@ -392,12 +392,12 @@ func TestRunDigitBg(t *testing.T) {
 	}
 }
 
-func TestRunDigitScale(t *testing.T) {
+func TestRunTextScale(t *testing.T) {
 	dir := t.TempDir()
 	out := filepath.Join(dir, "test.264")
 
-	err := run([]string{appName, "-w", "352", "-h", "288", "-n", "1", "-digits", "2",
-		"-digit-scale", "3", "-o", out})
+	err := run([]string{appName, "-w", "352", "-h", "288", "-n", "1", "-text", "%02d",
+		"-text-scale", "3", "-o", out})
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
@@ -417,7 +417,7 @@ func TestRunSMPTENon16Multiple(t *testing.T) {
 	out := filepath.Join(dir, "smpte.264")
 
 	// 100x100 is not a multiple of 16 (rounds to 7x7 MBs = 112x112 coded)
-	err := run([]string{appName, "-smpte", "-w", "100", "-h", "100", "-n", "1", "-digits", "2", "-o", out})
+	err := run([]string{appName, "-smpte", "-w", "100", "-h", "100", "-n", "1", "-text", "%02d", "-o", out})
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
@@ -432,13 +432,13 @@ func TestRunSMPTENon16Multiple(t *testing.T) {
 	}
 }
 
-func TestRunDigitBgNon16Multiple(t *testing.T) {
+func TestRunTextBgNon16Multiple(t *testing.T) {
 	dir := t.TempDir()
 	out := filepath.Join(dir, "test.264")
 
-	// 100x100 with digit-bg
-	err := run([]string{appName, "-w", "100", "-h", "100", "-n", "1", "-digits", "2",
-		"-digit-bg", "64,64,64", "-o", out})
+	// 100x100 with text-bg
+	err := run([]string{appName, "-w", "100", "-h", "100", "-n", "1", "-text", "%02d",
+		"-text-bg", "64,64,64", "-o", out})
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
@@ -453,12 +453,12 @@ func TestRunDigitBgNon16Multiple(t *testing.T) {
 	}
 }
 
-func TestRunDigitScaleNon16Multiple(t *testing.T) {
+func TestRunTextScaleNon16Multiple(t *testing.T) {
 	dir := t.TempDir()
 	out := filepath.Join(dir, "test.264")
 
 	// 300x200: 19x13 MBs, 2 digits at auto scale
-	err := run([]string{appName, "-w", "300", "-h", "200", "-n", "1", "-digits", "2", "-o", out})
+	err := run([]string{appName, "-w", "300", "-h", "200", "-n", "1", "-text", "%02d", "-o", out})
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
@@ -484,7 +484,7 @@ func TestRunBackgroundPattern(t *testing.T) {
 	}
 
 	out := filepath.Join(dir, "test.264")
-	err := run([]string{appName, "-w", "176", "-h", "80", "-n", "3", "-digits", "3",
+	err := run([]string{appName, "-w", "176", "-h", "80", "-n", "3", "-text", "%03d",
 		"-f", patternFile, "-o", out})
 	if err != nil {
 		t.Fatalf("run: %v", err)
@@ -603,14 +603,14 @@ func TestRunNoInputError(t *testing.T) {
 	}
 }
 
-func TestRunCounterWithoutDigitsError(t *testing.T) {
+func TestRunTextWithoutTextError(t *testing.T) {
 	dir := t.TempDir()
 	out := filepath.Join(dir, "test.264")
 
-	// -w/-h without -digits and no grid input
+	// -w/-h without -text and no grid input
 	err := run([]string{appName, "-w", "176", "-h", "80", "-o", out})
 	if err == nil {
-		t.Error("expected error when using -w/-h without -digits and no grid input")
+		t.Error("expected error when using -w/-h without -text and no grid input")
 	}
 }
 
@@ -618,7 +618,7 @@ func TestRunYUVOutput(t *testing.T) {
 	dir := t.TempDir()
 	out := filepath.Join(dir, "test.yuv")
 
-	err := run([]string{appName, "-w", "176", "-h", "80", "-n", "2", "-digits", "3", "-o", out})
+	err := run([]string{appName, "-w", "176", "-h", "80", "-n", "2", "-text", "%03d", "-o", out})
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
@@ -641,7 +641,7 @@ func TestRunNumberedPNG(t *testing.T) {
 	dir := t.TempDir()
 	out := filepath.Join(dir, "frame.png")
 
-	err := run([]string{appName, "-w", "48", "-h", "80", "-n", "3", "-digits", "1", "-o", out})
+	err := run([]string{appName, "-w", "48", "-h", "80", "-n", "3", "-text", "%d", "-o", out})
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
@@ -664,7 +664,7 @@ func TestRunNumberedJPEG(t *testing.T) {
 	dir := t.TempDir()
 	out := filepath.Join(dir, "frame.jpg")
 
-	err := run([]string{appName, "-w", "48", "-h", "80", "-n", "2", "-digits", "1", "-q", "90", "-o", out})
+	err := run([]string{appName, "-w", "48", "-h", "80", "-n", "2", "-text", "%d", "-q", "90", "-o", out})
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
@@ -687,7 +687,7 @@ func TestRunSinglePNG(t *testing.T) {
 	out := filepath.Join(dir, "frame.png")
 
 	// Single frame (-n 1 default) should produce frame.png without numbering
-	err := run([]string{appName, "-w", "48", "-h", "80", "-digits", "1", "-o", out})
+	err := run([]string{appName, "-w", "48", "-h", "80", "-text", "%d", "-o", out})
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
@@ -709,7 +709,7 @@ func TestRunSMPTEWithFileExclusive(t *testing.T) {
 	}
 	out := filepath.Join(dir, "test.264")
 
-	err := run([]string{appName, "-smpte", "-f", patternFile, "-w", "176", "-h", "80", "-digits", "1", "-o", out})
+	err := run([]string{appName, "-smpte", "-f", patternFile, "-w", "176", "-h", "80", "-text", "%d", "-o", out})
 	if err == nil {
 		t.Error("expected error for -smpte with -f")
 	}
@@ -722,7 +722,7 @@ func TestRunValidationErrors(t *testing.T) {
 	// b returns base args with extra flags appended.
 	b := func(extra ...string) []string {
 		base := []string{
-			appName, "-w", "176", "-h", "80", "-digits", "1", "-o", out,
+			appName, "-w", "176", "-h", "80", "-text", "%d", "-o", out,
 		}
 		return append(base, extra...)
 	}
@@ -738,10 +738,6 @@ func TestRunValidationErrors(t *testing.T) {
 		{"odd height", b("-h", "81"), "positive even"},
 		{"zero height", b("-h", "0"), "positive even"},
 		{"negative frames", b("-n", "-1"), "positive"},
-		{"negative digits", []string{
-			appName, "-smpte", "-w", "176", "-h", "80",
-			"-digits", "-1", "-o", out,
-		}, "non-negative"},
 		{"qp too low", b("-qp", "-1"), "QP must be 0-51"},
 		{"qp too high", b("-qp", "52"), "QP must be 0-51"},
 		{"negative idr-interval",
@@ -754,7 +750,7 @@ func TestRunValidationErrors(t *testing.T) {
 			b("-colorspace", "bt420"), "bt420"},
 		{"unknown output format", []string{
 			appName, "-w", "176", "-h", "80",
-			"-digits", "1", "-o", bmp,
+			"-text", "%d", "-o", bmp,
 		}, "unknown output format"},
 		{"invalid fg", b("-fg", "abc"), "expected R,G,B"},
 		{"invalid bg", b("-bg", "1,2"), "expected R,G,B"},

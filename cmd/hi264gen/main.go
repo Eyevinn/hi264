@@ -7,13 +7,13 @@
 //
 // In grid-only mode (-f or -grid/-c, no -w/-h), the frame size equals the grid
 // size in macroblocks. With -w/-h, the pattern tiles to fill custom dimensions,
-// and -digits adds a 7-segment frame counter overlay.
+// and -text adds a text overlay using format patterns.
 //
 // Usage:
 //
 //	hi264gen -f pattern.gridimg -o output.264
-//	hi264gen -f pattern.gridimg -w 176 -h 80 -n 10 -digits 3 -o output.264
-//	hi264gen -w 176 -h 80 -n 10 -digits 3 -o output.264
+//	hi264gen -f pattern.gridimg -w 176 -h 80 -n 10 -text "%03d" -o output.264
+//	hi264gen -w 176 -h 80 -n 10 -text "%03d" -o output.264
 //	hi264gen -f pattern.gridimg -o reference.png
 package main
 
@@ -41,8 +41,8 @@ var usg = `%s - generate H.264 bitstreams or raw images from grid patterns.
 Usage:
 
   %s -f pattern.gridimg -o output.264
-  %s -f pattern.gridimg -w 176 -h 80 -n 10 -digits 3 -o output.264
-  %s -w 176 -h 80 -n 10 -digits 3 -o output.264
+  %s -f pattern.gridimg -w 176 -h 80 -n 10 -text "%%03d" -o output.264
+  %s -w 176 -h 80 -n 10 -text "%%03d" -o output.264
 
 Output format is detected from the file extension:
   .264       H.264 Annex-B bitstream (SPS+PPS once, then N slices)
@@ -74,9 +74,9 @@ type options struct {
 	width       int
 	height      int
 	numFrames   int
-	digits      int
-	digitScale  int
-	digitBg     string
+	text        string
+	textScale   int
+	textBg      string
 	fg          string
 	bg          string
 	qp          int
@@ -103,18 +103,18 @@ func parseOptions(fs *flag.FlagSet, args []string) (*options, error) {
 	fs.IntVar(&opts.width, "w", 0, "frame width in pixels (must be even; default: grid-derived)")
 	fs.IntVar(&opts.height, "h", 0, "frame height in pixels (must be even; default: grid-derived)")
 	fs.IntVar(&opts.numFrames, "n", 1, "number of frames")
-	fs.IntVar(&opts.digits, "digits", 0, "number of counter digits (0 = no counter)")
-	fs.IntVar(&opts.digitScale, "digit-scale", 0, "digit scale factor (0 = auto)")
-	fs.StringVar(&opts.digitBg, "digit-bg", "", "digit background box color (R,G,B)")
-	fs.StringVar(&opts.fg, "fg", "255,255,255", "foreground RGB color for counter (R,G,B)")
-	fs.StringVar(&opts.bg, "bg", "0,0,0", "background RGB color for counter (R,G,B)")
+	fs.StringVar(&opts.text, "text", "", "text overlay pattern (e.g. \"%03d\", \"%mm:%ss.%ff\")")
+	fs.IntVar(&opts.textScale, "text-scale", 0, "text scale factor (0 = auto)")
+	fs.StringVar(&opts.textBg, "text-bg", "", "text background box color (R,G,B)")
+	fs.StringVar(&opts.fg, "fg", "255,255,255", "foreground RGB color for text (R,G,B)")
+	fs.StringVar(&opts.bg, "bg", "0,0,0", "background RGB color for text (R,G,B)")
 	fs.IntVar(&opts.qp, "qp", 26, "quantization parameter (0-51)")
 	fs.BoolVar(&opts.cabac, "cabac", false, "use CABAC entropy coding (Main profile)")
 	fs.BoolVar(&opts.noDeblock, "no-deblock", false, "disable deblocking filter")
 	fs.IntVar(&opts.idrInterval, "idr-interval", 0, "frames between IDR frames (0 = every frame is IDR)")
 	fs.IntVar(&opts.bpp, "bpp", 0, "target bytes per picture (pad with filler NALUs)")
 	fs.IntVar(&opts.jpegQual, "q", 85, "JPEG quality (1-100)")
-	fs.IntVar(&opts.fps, "fps", 25, "framerate for MP4 output")
+	fs.IntVar(&opts.fps, "fps", 25, "framerate for MP4 and timestamp specifiers")
 	fs.IntVar(&opts.fragDur, "frag-dur", 25, "fragment duration in frames for MP4 output")
 	fs.StringVar(&opts.colorspace, "colorspace", "bt601", "color space (bt601, bt709, bt2020)")
 	fs.BoolVar(&opts.fullRange, "full-range", false, "use full-range YCbCr (0-255)")
@@ -229,13 +229,13 @@ func run(args []string) error {
 
 	tiled := opts.width > 0 || opts.height > 0
 
-	// Validate: need either grid input or -w/-h with -digits
+	// Validate: need either grid input or -w/-h with -text
 	if !hasGridInput && !tiled {
 		fs.Usage()
-		return fmt.Errorf("either grid input (-f or -grid/-c) or -w/-h with -digits is required")
+		return fmt.Errorf("either grid input (-f or -grid/-c) or -w/-h with -text is required")
 	}
-	if !hasGridInput && tiled && opts.digits <= 0 {
-		return fmt.Errorf("-digits is required when using -w/-h without grid input")
+	if !hasGridInput && tiled && opts.text == "" {
+		return fmt.Errorf("-text is required when using -w/-h without grid input")
 	}
 
 	if tiled {
@@ -248,9 +248,6 @@ func run(args []string) error {
 	}
 	if opts.numFrames <= 0 {
 		return fmt.Errorf("number of frames must be positive, got %d", opts.numFrames)
-	}
-	if opts.digits < 0 {
-		return fmt.Errorf("digits must be non-negative, got %d", opts.digits)
 	}
 	if opts.qp < 0 || opts.qp > 51 {
 		return fmt.Errorf("QP must be 0-51, got %d", opts.qp)
@@ -298,18 +295,19 @@ func run(args []string) error {
 		patGrid, patColors = yuv.SMPTEBarsGridCS(mbWidth, cs, rng)
 	}
 
-	digitScale := opts.digitScale
-	if digitScale == 0 && opts.digits > 0 {
-		digitScale = yuv.AutoDigitScale(opts.digits, mbWidth, mbHeight)
+	textScale := opts.textScale
+	if textScale == 0 && opts.text != "" {
+		sampleText := yuv.FormatText(opts.text, 0, opts.fps)
+		textScale = yuv.AutoTextScale(sampleText, mbWidth, mbHeight)
 	}
 
-	var digitBg *yuv.Color
-	if opts.digitBg != "" && opts.digits > 0 {
-		c, derr := parseRGBWithCS(opts.digitBg, cs, rng)
+	var textBg *yuv.Color
+	if opts.textBg != "" && opts.text != "" {
+		c, derr := parseRGBWithCS(opts.textBg, cs, rng)
 		if derr != nil {
-			return fmt.Errorf("parsing -digit-bg: %w", derr)
+			return fmt.Errorf("parsing -text-bg: %w", derr)
 		}
-		digitBg = &c
+		textBg = &c
 	}
 
 	disableDeblock := 0
@@ -324,22 +322,22 @@ func run(args []string) error {
 	switch {
 	case ext == ".264":
 		return generateH264(opts, frameW, frameH, mbWidth, mbHeight, disableDeblock,
-			bgColor, fgColor, patGrid, patColors, tiled, digitScale, digitBg, cs, rng)
+			bgColor, fgColor, patGrid, patColors, tiled, textScale, textBg, cs, rng)
 	case ext == ".mp4":
 		return generateMP4(opts, frameW, frameH, mbWidth, mbHeight, disableDeblock,
-			bgColor, fgColor, patGrid, patColors, tiled, digitScale, digitBg, cs, rng)
+			bgColor, fgColor, patGrid, patColors, tiled, textScale, textBg, cs, rng)
 	case ext == ".y4m":
 		return generateY4M(opts, frameW, frameH, mbWidth, mbHeight,
-			bgColor, fgColor, patGrid, patColors, tiled, digitScale, digitBg, cs, rng)
+			bgColor, fgColor, patGrid, patColors, tiled, textScale, textBg, cs, rng)
 	case ext == ".yuv":
 		return generateYUV(opts, frameW, frameH, mbWidth, mbHeight,
-			bgColor, fgColor, patGrid, patColors, tiled, digitScale, digitBg)
+			bgColor, fgColor, patGrid, patColors, tiled, textScale, textBg)
 	case hasPct:
 		return generateFormattedImages(opts, frameW, frameH, mbWidth, mbHeight,
-			bgColor, fgColor, patGrid, patColors, tiled, digitScale, digitBg, cs, rng)
+			bgColor, fgColor, patGrid, patColors, tiled, textScale, textBg, cs, rng)
 	case ext == ".png" || ext == ".jpg" || ext == ".jpeg":
 		return generateNumberedImages(opts, frameW, frameH, mbWidth, mbHeight,
-			bgColor, fgColor, patGrid, patColors, tiled, digitScale, digitBg, cs, rng)
+			bgColor, fgColor, patGrid, patColors, tiled, textScale, textBg, cs, rng)
 	default:
 		return fmt.Errorf("unknown output format %q"+
 			" (use .264, .mp4, .y4m, .yuv, .png, .jpg, or %% pattern)", ext)
@@ -348,20 +346,21 @@ func run(args []string) error {
 
 // buildFrameGrid creates the grid and color map for frame i.
 // In grid-only mode (tiled=false), the pattern is used directly.
-// In counter mode (tiled=true, digits>0), a counter grid is created,
+// In text mode (tiled=true, text!=""), a text grid is created,
 // optionally with a tiled pattern background.
-// In tiled mode without counter (tiled=true, digits==0), the pattern
+// In tiled mode without text (tiled=true, text==""), the pattern
 // tiles to fill the frame.
 func buildFrameGrid(i int, patGrid *yuv.Grid, patColors yuv.ColorMap,
-	mbW, mbH, numDigits, scale int, bg, fg yuv.Color,
-	digitBg *yuv.Color, tiled bool) (*yuv.Grid, yuv.ColorMap, error) {
+	mbW, mbH, scale, fps int, text string, bg, fg yuv.Color,
+	textBg *yuv.Color, tiled bool) (*yuv.Grid, yuv.ColorMap, error) {
 
 	if !tiled {
 		return patGrid, patColors, nil
 	}
 
-	if numDigits > 0 {
-		grid, colors, err := yuv.CounterGrid(i, numDigits, mbW, mbH, scale, bg, fg, digitBg)
+	if text != "" {
+		formatted := yuv.FormatText(text, i, fps)
+		grid, colors, err := yuv.TextGrid(formatted, mbW, mbH, scale, bg, fg, textBg)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -374,7 +373,7 @@ func buildFrameGrid(i int, patGrid *yuv.Grid, patColors yuv.ColorMap,
 		return grid, colors, nil
 	}
 
-	// Tiled mode without counter: solid bg + tile pattern
+	// Tiled mode without text: solid bg + tile pattern
 	chars := make([][]byte, mbH)
 	for y := range mbH {
 		chars[y] = make([]byte, mbW)
@@ -394,7 +393,7 @@ func buildFrameGrid(i int, patGrid *yuv.Grid, patColors yuv.ColorMap,
 
 func generateH264(opts *options, frameW, frameH, mbWidth, mbHeight, disableDeblock int,
 	bg, fg yuv.Color, patGrid *yuv.Grid, patColors yuv.ColorMap, tiled bool,
-	digitScale int, digitBg *yuv.Color, cs yuv.ColorSpace, rng yuv.Range) error {
+	textScale int, textBg *yuv.Color, cs yuv.ColorSpace, rng yuv.Range) error {
 
 	f, err := os.Create(opts.output)
 	if err != nil {
@@ -408,7 +407,7 @@ func generateH264(opts *options, frameW, frameH, mbWidth, mbHeight, disableDeblo
 	}
 
 	grid, colors, err := buildFrameGrid(0, patGrid, patColors,
-		mbWidth, mbHeight, opts.digits, digitScale, bg, fg, digitBg, tiled)
+		mbWidth, mbHeight, textScale, opts.fps, opts.text, bg, fg, textBg, tiled)
 	if err != nil {
 		return err
 	}
@@ -437,10 +436,10 @@ func generateH264(opts *options, frameW, frameH, mbWidth, mbHeight, disableDeblo
 
 	if opts.idrInterval > 0 {
 		err = generateH264WithPSkip(f, opts, mbWidth, mbHeight,
-			bg, fg, enc, patGrid, patColors, tiled, digitScale, digitBg)
+			bg, fg, enc, patGrid, patColors, tiled, textScale, textBg)
 	} else {
 		err = generateH264AllIDR(f, opts, frameW, frameH, mbWidth, mbHeight, disableDeblock,
-			bg, fg, patGrid, patColors, tiled, digitScale, digitBg, cs, rng)
+			bg, fg, patGrid, patColors, tiled, textScale, textBg, cs, rng)
 	}
 	if err != nil {
 		return err
@@ -477,11 +476,11 @@ func padSlice(slice []byte, bpp int, frameIdx int) ([]byte, error) {
 
 func generateH264AllIDR(f *os.File, opts *options, frameW, frameH, mbWidth, mbHeight, disableDeblock int,
 	bg, fg yuv.Color, patGrid *yuv.Grid, patColors yuv.ColorMap, tiled bool,
-	digitScale int, digitBg *yuv.Color, cs yuv.ColorSpace, rng yuv.Range) error {
+	textScale int, textBg *yuv.Color, cs yuv.ColorSpace, rng yuv.Range) error {
 
 	for i := range opts.numFrames {
 		grid, colors, err := buildFrameGrid(i, patGrid, patColors,
-			mbWidth, mbHeight, opts.digits, digitScale, bg, fg, digitBg, tiled)
+			mbWidth, mbHeight, textScale, opts.fps, opts.text, bg, fg, textBg, tiled)
 		if err != nil {
 			return err
 		}
@@ -512,7 +511,7 @@ func generateH264AllIDR(f *os.File, opts *options, frameW, frameH, mbWidth, mbHe
 
 func generateH264WithPSkip(f *os.File, opts *options, mbWidth, mbHeight int,
 	bg, fg yuv.Color, enc *encode.FrameEncoder, patGrid *yuv.Grid, patColors yuv.ColorMap, tiled bool,
-	digitScale int, digitBg *yuv.Color) error {
+	textScale int, textBg *yuv.Color) error {
 
 	idrPicID := uint32(0)
 	frameNum := uint32(0)
@@ -520,7 +519,7 @@ func generateH264WithPSkip(f *os.File, opts *options, mbWidth, mbHeight int,
 	for i := range opts.numFrames {
 		if i%opts.idrInterval == 0 {
 			grid, colors, err := buildFrameGrid(i, patGrid, patColors,
-				mbWidth, mbHeight, opts.digits, digitScale, bg, fg, digitBg, tiled)
+				mbWidth, mbHeight, textScale, opts.fps, opts.text, bg, fg, textBg, tiled)
 			if err != nil {
 				return err
 			}
@@ -557,7 +556,7 @@ func generateH264WithPSkip(f *os.File, opts *options, mbWidth, mbHeight int,
 
 func generateMP4(opts *options, frameW, frameH, mbWidth, mbHeight, disableDeblock int,
 	bg, fg yuv.Color, patGrid *yuv.Grid, patColors yuv.ColorMap, tiled bool,
-	digitScale int, digitBg *yuv.Color, cs yuv.ColorSpace, rng yuv.Range) error {
+	textScale int, textBg *yuv.Color, cs yuv.ColorSpace, rng yuv.Range) error {
 
 	f, err := os.Create(opts.output)
 	if err != nil {
@@ -595,7 +594,7 @@ func generateMP4(opts *options, frameW, frameH, mbWidth, mbHeight, disableDebloc
 
 	// Create encoder for frame generation
 	grid, colors, err := buildFrameGrid(0, patGrid, patColors,
-		mbWidth, mbHeight, opts.digits, digitScale, bg, fg, digitBg, tiled)
+		mbWidth, mbHeight, textScale, opts.fps, opts.text, bg, fg, textBg, tiled)
 	if err != nil {
 		return err
 	}
@@ -625,7 +624,7 @@ func generateMP4(opts *options, frameW, frameH, mbWidth, mbHeight, disableDebloc
 		for i := range opts.numFrames {
 			if i%opts.idrInterval == 0 {
 				g, c, err := buildFrameGrid(i, patGrid, patColors,
-					mbWidth, mbHeight, opts.digits, digitScale, bg, fg, digitBg, tiled)
+					mbWidth, mbHeight, textScale, opts.fps, opts.text, bg, fg, textBg, tiled)
 				if err != nil {
 					return err
 				}
@@ -656,7 +655,7 @@ func generateMP4(opts *options, frameW, frameH, mbWidth, mbHeight, disableDebloc
 	} else {
 		for i := range opts.numFrames {
 			g, c, err := buildFrameGrid(i, patGrid, patColors,
-				mbWidth, mbHeight, opts.digits, digitScale, bg, fg, digitBg, tiled)
+				mbWidth, mbHeight, textScale, opts.fps, opts.text, bg, fg, textBg, tiled)
 			if err != nil {
 				return err
 			}
@@ -737,7 +736,7 @@ func generateMP4(opts *options, frameW, frameH, mbWidth, mbHeight, disableDebloc
 
 func generateY4M(opts *options, frameW, frameH, mbWidth, mbHeight int,
 	bg, fg yuv.Color, patGrid *yuv.Grid, patColors yuv.ColorMap, tiled bool,
-	digitScale int, digitBg *yuv.Color, cs yuv.ColorSpace, rng yuv.Range) error {
+	textScale int, textBg *yuv.Color, cs yuv.ColorSpace, rng yuv.Range) error {
 
 	f, err := os.Create(opts.output)
 	if err != nil {
@@ -751,7 +750,7 @@ func generateY4M(opts *options, frameW, frameH, mbWidth, mbHeight int,
 
 	for i := range opts.numFrames {
 		grid, colors, err := buildFrameGrid(i, patGrid, patColors,
-			mbWidth, mbHeight, opts.digits, digitScale, bg, fg, digitBg, tiled)
+			mbWidth, mbHeight, textScale, opts.fps, opts.text, bg, fg, textBg, tiled)
 		if err != nil {
 			return err
 		}
@@ -773,14 +772,14 @@ func generateY4M(opts *options, frameW, frameH, mbWidth, mbHeight int,
 
 func generateFormattedImages(opts *options, frameW, frameH, mbWidth, mbHeight int,
 	bg, fg yuv.Color, patGrid *yuv.Grid, patColors yuv.ColorMap, tiled bool,
-	digitScale int, digitBg *yuv.Color, cs yuv.ColorSpace, rng yuv.Range) error {
+	textScale int, textBg *yuv.Color, cs yuv.ColorSpace, rng yuv.Range) error {
 
 	ext := strings.ToLower(filepath.Ext(opts.output))
 	isJPEG := ext == ".jpg" || ext == ".jpeg"
 
 	for i := range opts.numFrames {
 		grid, colors, err := buildFrameGrid(i, patGrid, patColors,
-			mbWidth, mbHeight, opts.digits, digitScale, bg, fg, digitBg, tiled)
+			mbWidth, mbHeight, textScale, opts.fps, opts.text, bg, fg, textBg, tiled)
 		if err != nil {
 			return err
 		}
@@ -813,7 +812,7 @@ func generateFormattedImages(opts *options, frameW, frameH, mbWidth, mbHeight in
 
 func generateYUV(opts *options, frameW, frameH, mbWidth, mbHeight int,
 	bg, fg yuv.Color, patGrid *yuv.Grid, patColors yuv.ColorMap, tiled bool,
-	digitScale int, digitBg *yuv.Color) error {
+	textScale int, textBg *yuv.Color) error {
 
 	outPath := yuv.AddSuffix(opts.output, frameW, frameH)
 	f, err := os.Create(outPath)
@@ -824,7 +823,7 @@ func generateYUV(opts *options, frameW, frameH, mbWidth, mbHeight int,
 
 	for i := range opts.numFrames {
 		grid, colors, err := buildFrameGrid(i, patGrid, patColors,
-			mbWidth, mbHeight, opts.digits, digitScale, bg, fg, digitBg, tiled)
+			mbWidth, mbHeight, textScale, opts.fps, opts.text, bg, fg, textBg, tiled)
 		if err != nil {
 			return err
 		}
@@ -845,14 +844,14 @@ func generateYUV(opts *options, frameW, frameH, mbWidth, mbHeight int,
 
 func generateNumberedImages(opts *options, frameW, frameH, mbWidth, mbHeight int,
 	bg, fg yuv.Color, patGrid *yuv.Grid, patColors yuv.ColorMap, tiled bool,
-	digitScale int, digitBg *yuv.Color, cs yuv.ColorSpace, rng yuv.Range) error {
+	textScale int, textBg *yuv.Color, cs yuv.ColorSpace, rng yuv.Range) error {
 
 	ext := strings.ToLower(filepath.Ext(opts.output))
 	isJPEG := ext == ".jpg" || ext == ".jpeg"
 
 	for i := range opts.numFrames {
 		grid, colors, err := buildFrameGrid(i, patGrid, patColors,
-			mbWidth, mbHeight, opts.digits, digitScale, bg, fg, digitBg, tiled)
+			mbWidth, mbHeight, textScale, opts.fps, opts.text, bg, fg, textBg, tiled)
 		if err != nil {
 			return err
 		}

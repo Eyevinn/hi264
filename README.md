@@ -93,40 +93,43 @@ go run ./cmd/hi264gen -f examples/sweden.gridimg -cabac -o sweden_cabac.264
 go run ./cmd/hi264gen -grid "xy,yx" -c x=235,128,128 -c y=16,128,128 -o checker.264
 go run ./cmd/hi264gen -grid "ab" -c a=255,0,0 -c b=0,0,255 -rgb -qp 20 -no-deblock -o test.264
 
-# Counter: frame counter digits on solid background
-go run ./cmd/hi264gen -w 176 -h 80 -n 10 -digits 3 -o counter.264
+# Text overlay: frame counter on solid background
+go run ./cmd/hi264gen -w 176 -h 80 -n 10 -text "%03d" -o counter.264
+
+# Timestamp overlay
+go run ./cmd/hi264gen -w 512 -h 240 -n 75 -fps 25 -text "%mm:%ss.%ff" -o timestamp.264
 
 # With P_Skip frames (IDR every 50 frames, P_Skip copies between, CAVLC)
-go run ./cmd/hi264gen -w 1280 -h 720 -n 121 -digits 3 -idr-interval 50 -o counter.264
+go run ./cmd/hi264gen -w 1280 -h 720 -n 121 -text "%03d" -idr-interval 50 -o counter.264
 
 # With CABAC P_Skip frames (Main profile)
-go run ./cmd/hi264gen -w 1280 -h 720 -n 121 -digits 3 -cabac -idr-interval 50 -o counter.264
+go run ./cmd/hi264gen -w 1280 -h 720 -n 121 -text "%03d" -cabac -idr-interval 50 -o counter.264
 
 # Fragmented MP4 output (25 fps default, fragment every 25 frames)
-go run ./cmd/hi264gen -w 176 -h 80 -n 50 -digits 3 -o counter.mp4
+go run ./cmd/hi264gen -w 176 -h 80 -n 50 -text "%03d" -o counter.mp4
 
 # MP4 with custom framerate and fragment duration
-go run ./cmd/hi264gen -w 320 -h 240 -n 75 -digits 3 -fps 30 -frag-dur 30 -o counter.mp4
+go run ./cmd/hi264gen -w 320 -h 240 -n 75 -text "%03d" -fps 30 -frag-dur 30 -o counter.mp4
 
-# Tiled: grid pattern tiled to fill custom dimensions, with optional counter
-go run ./cmd/hi264gen -f examples/checker4x4.gridimg -w 176 -h 80 -n 10 -digits 3 -o counter.264
+# Tiled: grid pattern tiled to fill custom dimensions, with optional text overlay
+go run ./cmd/hi264gen -f examples/checker4x4.gridimg -w 176 -h 80 -n 10 -text "%03d" -o counter.264
 
 # SMPTE color bars with counter overlay
-go run ./cmd/hi264gen -smpte -w 176 -h 80 -n 10 -digits 3 -o smpte.264
+go run ./cmd/hi264gen -smpte -w 176 -h 80 -n 10 -text "%03d" -o smpte.264
 
-# SMPTE bars with digit background box and explicit scale
-go run ./cmd/hi264gen -smpte -w 352 -h 288 -n 1 -digits 2 -digit-scale 3 -digit-bg 0,0,0 -o smpte_big.264
+# SMPTE bars with text background box and explicit scale
+go run ./cmd/hi264gen -smpte -w 352 -h 288 -n 1 -text "%02d" -text-scale 3 -text-bg 0,0,0 -o smpte_big.264
 
 # Fixed bytes per picture (pad with H.264 filler NALUs for CBR-like streams)
 go run ./cmd/hi264gen -smpte -w 176 -h 80 -bpp 5000 -o padded.264
-go run ./cmd/hi264gen -w 320 -h 240 -n 50 -digits 3 -bpp 8000 -o cbr_counter.mp4
+go run ./cmd/hi264gen -w 320 -h 240 -n 50 -text "%03d" -bpp 8000 -o cbr_counter.mp4
 
 # Raw image output (no H.264 encoding, useful as decoder reference)
 go run ./cmd/hi264gen -f examples/sweden.gridimg -o sweden.png
 go run ./cmd/hi264gen -f examples/sweden.gridimg -o sweden.yuv
 go run ./cmd/hi264gen -f examples/sweden.gridimg -q 95 -o sweden.jpg
-go run ./cmd/hi264gen -w 176 -h 80 -n 5 -digits 3 -o output.y4m
-go run ./cmd/hi264gen -w 176 -h 80 -n 5 -digits 3 -o frame_%03d.png
+go run ./cmd/hi264gen -w 176 -h 80 -n 5 -text "%03d" -o output.y4m
+go run ./cmd/hi264gen -w 176 -h 80 -n 5 -text "%03d" -o frame_%03d.png
 ```
 
 ```bash
@@ -149,9 +152,9 @@ Flags:
 | `-w` | Frame width in pixels | grid width |
 | `-h` | Frame height in pixels | grid height |
 | `-n` | Number of frames | 1 |
-| `-digits` | Counter digit count (0 = no counter) | 0 |
-| `-digit-scale` | Digit scale factor (0 = auto-fit) | 0 |
-| `-digit-bg` | Digit background box color (R,G,B) | none |
+| `-text` | Text overlay pattern (e.g. `"%03d"`, `"%mm:%ss.%ff"`) | — |
+| `-text-scale` | Text scale factor (0 = auto-fit) | 0 |
+| `-text-bg` | Text background box color (R,G,B) | none |
 | `-fg` | Foreground color (R,G,B) | — |
 | `-bg` | Background color (R,G,B) | — |
 | `-qp` | Quantization parameter | 26 |
@@ -183,13 +186,13 @@ playback:
 
 ```bash
 # 500 kbit/s tier — green background
-go run ./cmd/hi264gen -w 320 -h 240 -n 50 -digits 3 -bg 0,128,0 -bpp 2500 -o low.mp4
+go run ./cmd/hi264gen -w 320 -h 240 -n 50 -text "%03d" -bg 0,128,0 -bpp 2500 -o low.mp4
 
 # 1500 kbit/s tier — blue background
-go run ./cmd/hi264gen -w 640 -h 360 -n 50 -digits 3 -bg 0,0,200 -bpp 7500 -o mid.mp4
+go run ./cmd/hi264gen -w 640 -h 360 -n 50 -text "%03d" -bg 0,0,200 -bpp 7500 -o mid.mp4
 
 # 3000 kbit/s tier — red background
-go run ./cmd/hi264gen -w 1280 -h 720 -n 50 -digits 3 -bg 200,0,0 -bpp 15000 -o high.mp4
+go run ./cmd/hi264gen -w 1280 -h 720 -n 50 -text "%03d" -bg 200,0,0 -bpp 15000 -o high.mp4
 ```
 
 This makes it easy to verify that an ABR player switches between the correct
