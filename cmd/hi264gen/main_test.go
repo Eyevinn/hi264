@@ -701,6 +701,81 @@ func TestRunSinglePNG(t *testing.T) {
 	}
 }
 
+func TestRunSMPTEWithFileExclusive(t *testing.T) {
+	dir := t.TempDir()
+	patternFile := filepath.Join(dir, "test.gridimg")
+	if err := os.WriteFile(patternFile, []byte("@rgb\nR=255,0,0\n\nR\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(dir, "test.264")
+
+	err := run([]string{appName, "-smpte", "-f", patternFile, "-w", "176", "-h", "80", "-digits", "1", "-o", out})
+	if err == nil {
+		t.Error("expected error for -smpte with -f")
+	}
+}
+
+func TestRunValidationErrors(t *testing.T) {
+	dir := t.TempDir()
+	out := filepath.Join(dir, "test.264")
+
+	// b returns base args with extra flags appended.
+	b := func(extra ...string) []string {
+		base := []string{
+			appName, "-w", "176", "-h", "80", "-digits", "1", "-o", out,
+		}
+		return append(base, extra...)
+	}
+	bmp := filepath.Join(dir, "test.bmp")
+
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"odd width", b("-w", "101"), "positive even"},
+		{"zero width", b("-w", "0"), "positive even"},
+		{"odd height", b("-h", "81"), "positive even"},
+		{"zero height", b("-h", "0"), "positive even"},
+		{"negative frames", b("-n", "-1"), "positive"},
+		{"negative digits", []string{
+			appName, "-smpte", "-w", "176", "-h", "80",
+			"-digits", "-1", "-o", out,
+		}, "non-negative"},
+		{"qp too low", b("-qp", "-1"), "QP must be 0-51"},
+		{"qp too high", b("-qp", "52"), "QP must be 0-51"},
+		{"negative idr-interval",
+			b("-idr-interval", "-1"), "non-negative"},
+		{"negative bpp", b("-bpp", "-1"), "non-negative"},
+		{"zero fps", b("-fps", "0"), "fps must be positive"},
+		{"zero frag-dur",
+			b("-frag-dur", "0"), "frag-dur must be positive"},
+		{"invalid colorspace",
+			b("-colorspace", "bt420"), "bt420"},
+		{"unknown output format", []string{
+			appName, "-w", "176", "-h", "80",
+			"-digits", "1", "-o", bmp,
+		}, "unknown output format"},
+		{"invalid fg", b("-fg", "abc"), "expected R,G,B"},
+		{"invalid bg", b("-bg", "1,2"), "expected R,G,B"},
+		{"f with grid", []string{
+			appName, "-f", "x.gridimg", "-grid", "xy", "-o", out,
+		}, "mutually exclusive"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := run(tt.args)
+			if err == nil {
+				t.Fatal("expected error")
+			}
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Errorf("error %q should contain %q", err, tt.want)
+			}
+		})
+	}
+}
+
 func countStartCodes(data []byte) int {
 	count := 0
 	for i := 0; i <= len(data)-4; i++ {
