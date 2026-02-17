@@ -20,7 +20,7 @@ import (
 
 const appName = "hi264dec"
 
-var usg = `%s - decode H.264 frames from raw Annex-B .264 files or MP4 containers.
+var usg = `%s - decode H.264 IDR frames from raw Annex-B .264 files or MP4 containers.
 
 Usage:
 
@@ -43,6 +43,7 @@ Options:
 type options struct {
 	version    bool
 	noDeblock  bool
+	idrAndSkip bool
 	n          int
 	jpegQual   int
 	colorspace string
@@ -52,6 +53,7 @@ func parseOptions(fs *flag.FlagSet, args []string) (*options, error) {
 	var opts options
 	fs.BoolVar(&opts.version, "version", false, "Get hi264 version")
 	fs.BoolVar(&opts.noDeblock, "no-deblock", false, "skip deblocking filter")
+	fs.BoolVar(&opts.idrAndSkip, "idr-and-skip", false, "decode P_Skip frames in addition to IDR")
 	fs.IntVar(&opts.n, "n", 1, "max frames to decode")
 	fs.IntVar(&opts.jpegQual, "q", 85, "JPEG quality (1-100)")
 	fs.StringVar(&opts.colorspace, "colorspace", "", "override color space (bt601, bt709, bt2020)")
@@ -99,9 +101,9 @@ func run(args []string) error {
 
 	var frames []*frame.Frame
 	if isMP4(inputFile) {
-		frames, err = decodeMP4(inputFile, dec, opts.n)
+		frames, err = decodeMP4(inputFile, dec, opts.n, opts.idrAndSkip)
 	} else {
-		frames, err = decodeAnnexB(inputFile, dec, opts.n)
+		frames, err = decodeAnnexB(inputFile, dec, opts.n, opts.idrAndSkip)
 	}
 	if err != nil {
 		return err
@@ -138,7 +140,7 @@ func isMP4(path string) bool {
 	return ext == ".mp4" || ext == ".m4v"
 }
 
-func decodeAnnexB(inputFile string, dec *decoder.Decoder, n int) ([]*frame.Frame, error) {
+func decodeAnnexB(inputFile string, dec *decoder.Decoder, n int, idrAndSkip bool) ([]*frame.Frame, error) {
 	data, err := os.ReadFile(inputFile)
 	if err != nil {
 		return nil, fmt.Errorf("read input: %w", err)
@@ -148,7 +150,7 @@ func decodeAnnexB(inputFile string, dec *decoder.Decoder, n int) ([]*frame.Frame
 	fmt.Printf("Found %d NALUs\n", len(nalus))
 	printNALUInfo(nalus)
 
-	if n == 1 {
+	if n == 1 && !idrAndSkip {
 		f, err := dec.DecodeAnnexB(data)
 		if err != nil {
 			return nil, fmt.Errorf("decode: %w", err)
@@ -156,7 +158,12 @@ func decodeAnnexB(inputFile string, dec *decoder.Decoder, n int) ([]*frame.Frame
 		return []*frame.Frame{f}, nil
 	}
 
-	frames, err := dec.DecodeAllAnnexB(data)
+	var frames []*frame.Frame
+	if idrAndSkip {
+		frames, err = dec.DecodeAllAnnexB(data)
+	} else {
+		frames, err = dec.DecodeIDRAnnexB(data)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("decode: %w", err)
 	}
@@ -166,7 +173,7 @@ func decodeAnnexB(inputFile string, dec *decoder.Decoder, n int) ([]*frame.Frame
 	return frames, nil
 }
 
-func decodeMP4(inputFile string, dec *decoder.Decoder, n int) ([]*frame.Frame, error) {
+func decodeMP4(inputFile string, dec *decoder.Decoder, n int, idrAndSkip bool) ([]*frame.Frame, error) {
 	f, err := os.Open(inputFile)
 	if err != nil {
 		return nil, fmt.Errorf("open input: %w", err)
@@ -211,19 +218,19 @@ func decodeMP4(inputFile string, dec *decoder.Decoder, n int) ([]*frame.Frame, e
 	// Try progressive MP4 first
 	nrSamples := videoTrack.GetNrSamples()
 	if nrSamples > 0 {
-		return extractProgressive(mp4File, videoTrack, f, spsNALUs, ppsNALUs, dec, n)
+		return extractProgressive(mp4File, videoTrack, f, spsNALUs, ppsNALUs, dec, n, idrAndSkip)
 	}
 
 	// Fall back to fragmented MP4
 	if len(mp4File.Segments) > 0 {
-		return extractFragmented(mp4File, f, spsNALUs, ppsNALUs, dec, n, videoTrack)
+		return extractFragmented(mp4File, f, spsNALUs, ppsNALUs, dec, n, videoTrack, idrAndSkip)
 	}
 
 	return nil, fmt.Errorf("no samples found (neither progressive nor fragmented)")
 }
 
 func extractProgressive(mp4File *mp4.File, videoTrack *mp4.TrakBox, f *os.File,
-	spsNALUs, ppsNALUs [][]byte, dec *decoder.Decoder, n int) ([]*frame.Frame, error) {
+	spsNALUs, ppsNALUs [][]byte, dec *decoder.Decoder, n int, idrAndSkip bool) ([]*frame.Frame, error) {
 
 	nrSamples := videoTrack.GetNrSamples()
 	stss := videoTrack.Mdia.Minf.Stbl.Stss
@@ -231,7 +238,7 @@ func extractProgressive(mp4File *mp4.File, videoTrack *mp4.TrakBox, f *os.File,
 
 	var frames []*frame.Frame
 	for sampleNr := uint32(1); sampleNr <= nrSamples && len(frames) < n; sampleNr++ {
-		if stss != nil && !stss.IsSyncSample(sampleNr) {
+		if !idrAndSkip && stss != nil && !stss.IsSyncSample(sampleNr) {
 			continue
 		}
 
@@ -249,7 +256,7 @@ func extractProgressive(mp4File *mp4.File, videoTrack *mp4.TrakBox, f *os.File,
 			sampleData = append(sampleData, data...)
 		}
 
-		fr, err := decodeSample(sampleData, spsNALUs, ppsNALUs, dec)
+		fr, err := decodeSample(sampleData, spsNALUs, ppsNALUs, dec, idrAndSkip)
 		if err != nil {
 			return nil, fmt.Errorf("decode sample %d: %w", sampleNr, err)
 		}
@@ -263,7 +270,8 @@ func extractProgressive(mp4File *mp4.File, videoTrack *mp4.TrakBox, f *os.File,
 }
 
 func extractFragmented(mp4File *mp4.File, f *os.File,
-	spsNALUs, ppsNALUs [][]byte, dec *decoder.Decoder, n int, videoTrack *mp4.TrakBox) ([]*frame.Frame, error) {
+	spsNALUs, ppsNALUs [][]byte, dec *decoder.Decoder, n int,
+	videoTrack *mp4.TrakBox, idrAndSkip bool) ([]*frame.Frame, error) {
 
 	trackID := videoTrack.Tkhd.TrackID
 	fmt.Printf("Fragmented MP4: %d segments, trackID=%d\n", len(mp4File.Segments), trackID)
@@ -297,14 +305,14 @@ func extractFragmented(mp4File *mp4.File, f *os.File,
 						sampleNr++
 						sample := trun.Samples[i]
 
-						if sample.IsSync() {
+						if idrAndSkip || sample.IsSync() {
 							data := make([]byte, sample.Size)
 							_, err := f.ReadAt(data, int64(baseOffset+sampleOffset))
 							if err != nil {
 								return nil, fmt.Errorf("read fragment sample %d: %w", sampleNr, err)
 							}
 
-							fr, err := decodeSample(data, spsNALUs, ppsNALUs, dec)
+							fr, err := decodeSample(data, spsNALUs, ppsNALUs, dec, idrAndSkip)
 							if err != nil {
 								return nil, fmt.Errorf("decode sample %d: %w", sampleNr, err)
 							}
@@ -326,7 +334,8 @@ func extractFragmented(mp4File *mp4.File, f *os.File,
 	return frames, nil
 }
 
-func decodeSample(sampleData []byte, spsNALUs, ppsNALUs [][]byte, dec *decoder.Decoder) (*frame.Frame, error) {
+func decodeSample(sampleData []byte, spsNALUs, ppsNALUs [][]byte,
+	dec *decoder.Decoder, idrAndSkip bool) (*frame.Frame, error) {
 	sampleNALUs, err := avc.GetNalusFromSample(sampleData)
 	if err != nil {
 		return nil, fmt.Errorf("get nalus from sample: %w", err)
@@ -337,6 +346,16 @@ func decodeSample(sampleData []byte, spsNALUs, ppsNALUs [][]byte, dec *decoder.D
 	nalus = append(nalus, ppsNALUs...)
 	nalus = append(nalus, sampleNALUs...)
 
+	if idrAndSkip {
+		frames, err := dec.DecodeAllFrames(nalus)
+		if err != nil {
+			return nil, err
+		}
+		if len(frames) == 0 {
+			return nil, fmt.Errorf("no decodable frames in sample")
+		}
+		return frames[0], nil
+	}
 	return dec.DecodeNALUs(nalus)
 }
 
