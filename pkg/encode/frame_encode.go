@@ -258,9 +258,9 @@ func (e *FrameEncoder) encodeMBCABAC(enc *cabac.Encoder, ctx []cabac.CtxState,
 	qp := e.QP
 	qpc := ChromaQP(qp)
 
-	// Compute DC prediction for luma (16x16 DC mode)
-	predDC := computeLumaDCPred(reconY, strideY, mbX, mbY)
-	lumaResidual := int32(c.Y) - int32(predDC)
+	// Select best luma prediction mode
+	lumaMode, lumaPred := selectLumaMode(reconY, strideY, mbX, mbY, c.Y)
+	lumaResidual := int32(c.Y) - int32(lumaPred)
 
 	dc4x4 := ForwardTransformDC4x4(lumaResidual)
 	var dcMatrix [16]int32
@@ -273,8 +273,8 @@ func (e *FrameEncoder) encodeMBCABAC(enc *cabac.Encoder, ctx []cabac.CtxState,
 	lumaCBP := 0
 	chromaCBP := 0
 
-	cbPreds := computeChromaDCPreds4x4(reconCb, strideC, mbX, mbY)
-	crPreds := computeChromaDCPreds4x4(reconCr, strideC, mbX, mbY)
+	// Select best chroma prediction mode
+	chromaMode, cbPreds, crPreds := selectChromaMode(reconCb, reconCr, strideC, mbX, mbY, c.Cb, c.Cr)
 
 	var cbDCMatrix [4]int32
 	var crDCMatrix [4]int32
@@ -298,7 +298,7 @@ func (e *FrameEncoder) encodeMBCABAC(enc *cabac.Encoder, ctx []cabac.CtxState,
 		chromaCBP = 1
 	}
 
-	mbType := 1 + 2 + 4*chromaCBP + 12*lumaCBP
+	mbType := 1 + lumaMode + 4*chromaCBP + 12*lumaCBP
 
 	// --- CABAC encoding of syntax elements ---
 
@@ -316,10 +316,10 @@ func (e *FrameEncoder) encodeMBCABAC(enc *cabac.Encoder, ctx []cabac.CtxState,
 	topNotINxN := topState != nil
 	encodeMBTypeI16x16(enc, ctx, mbType, leftNotINxN, topNotINxN)
 
-	// intra_chroma_pred_mode = 0 (DC)
+	// intra_chroma_pred_mode
 	leftChromaNZ := leftState != nil && leftState.intraChromaPredMode != 0
 	topChromaNZ := topState != nil && topState.intraChromaPredMode != 0
-	encodeChromaPredMode(enc, ctx, 0, leftChromaNZ, topChromaNZ)
+	encodeChromaPredMode(enc, ctx, chromaMode, leftChromaNZ, topChromaNZ)
 
 	// mb_qp_delta = 0
 	encodeQPDelta(enc, ctx, 0, false)
@@ -357,11 +357,11 @@ func (e *FrameEncoder) encodeMBCABAC(enc *cabac.Encoder, ctx []cabac.CtxState,
 
 	// Update MB state
 	mbStates[mbIdx].mbType = mbType
-	mbStates[mbIdx].intraChromaPredMode = 0
+	mbStates[mbIdx].intraChromaPredMode = chromaMode
 	mbStates[mbIdx].cbpChroma = chromaCBP
 
 	// Update reconstructed pixels
-	reconLumaVal := reconstructLumaValue(quantDC, predDC, qp)
+	reconLumaVal := reconstructLumaValue(quantDC, lumaPred, qp)
 	for y := 0; y < 16; y++ {
 		off := (mbY*16+y)*strideY + mbX*16
 		for x := 0; x < 16; x++ {
@@ -422,11 +422,9 @@ func (e *FrameEncoder) encodeMB(w *BitWriter, mbX, mbY int, c yuv.Color,
 	qp := e.QP
 	qpc := ChromaQP(qp)
 
-	// Compute DC prediction for luma (16x16 DC mode)
-	predDC := computeLumaDCPred(reconY, strideY, mbX, mbY)
-
-	// Luma residual = target - prediction
-	lumaResidual := int32(c.Y) - int32(predDC)
+	// Select best luma prediction mode
+	lumaMode, lumaPred := selectLumaMode(reconY, strideY, mbX, mbY, c.Y)
+	lumaResidual := int32(c.Y) - int32(lumaPred)
 
 	// For I_16x16: each 4x4 block has DC = 4*residual (forward DCT of constant)
 	dc4x4 := ForwardTransformDC4x4(lumaResidual)
@@ -446,9 +444,8 @@ func (e *FrameEncoder) encodeMB(w *BitWriter, mbX, mbY int, c yuv.Color,
 	lumaCBP := 0   // 0 = no AC coefficients
 	chromaCBP := 0 // 0 = no chroma residual
 
-	// Compute per-sub-block chroma DC prediction (matching the decoder's predictChromaDC8x8)
-	cbPreds := computeChromaDCPreds4x4(reconCb, strideC, mbX, mbY)
-	crPreds := computeChromaDCPreds4x4(reconCr, strideC, mbX, mbY)
+	// Select best chroma prediction mode
+	chromaMode, cbPreds, crPreds := selectChromaMode(reconCb, reconCr, strideC, mbX, mbY, c.Cb, c.Cr)
 
 	// Chroma DC: each 4x4 sub-block has its own residual
 	var cbDCMatrix [4]int32
@@ -477,14 +474,13 @@ func (e *FrameEncoder) encodeMB(w *BitWriter, mbX, mbY int, c yuv.Color,
 
 	// Determine I_16x16 mb_type
 	// mb_type = 1 + pred_mode + 4*cbp_chroma + 12*cbp_luma_flag
-	// pred_mode = 2 (DC), cbp_chroma = 0 or 1, cbp_luma_flag = 0 or 1
-	mbType := 1 + 2 + 4*chromaCBP + 12*lumaCBP
+	mbType := 1 + lumaMode + 4*chromaCBP + 12*lumaCBP
 
 	// Write mb_type as ue(v) — Table 7-11: mb_type IS the ue(v) code value
 	w.WriteUE(uint32(mbType))
 
-	// intra_chroma_pred_mode = 0 (DC)
-	w.WriteUE(0)
+	// intra_chroma_pred_mode
+	w.WriteUE(uint32(chromaMode))
 
 	// mb_qp_delta = 0
 	w.WriteSE(0)
@@ -525,7 +521,7 @@ func (e *FrameEncoder) encodeMB(w *BitWriter, mbX, mbY int, c yuv.Color,
 
 	// Update reconstructed pixels
 	// Need to do inverse quant + inverse transform to get actual reconstructed values
-	reconLumaVal := reconstructLumaValue(quantDC, predDC, qp)
+	reconLumaVal := reconstructLumaValue(quantDC, lumaPred, qp)
 	for y := 0; y < 16; y++ {
 		off := (mbY*16+y)*strideY + mbX*16
 		for x := 0; x < 16; x++ {
@@ -582,6 +578,105 @@ func computeLumaDCPred(reconY []uint8, strideY, mbX, mbY int) uint8 {
 		return uint8((sum + 16) >> 5)
 	}
 	return uint8((sum + 8) >> 4)
+}
+
+// computeLumaVerticalPred returns the prediction value for Vertical mode (mode 0).
+// For flat blocks, all top neighbor pixels are identical, so we sample one.
+func computeLumaVerticalPred(reconY []uint8, strideY, mbX, mbY int) uint8 {
+	return reconY[(mbY*16-1)*strideY+mbX*16]
+}
+
+// computeLumaHorizontalPred returns the prediction value for Horizontal mode (mode 1).
+// For flat blocks, all left neighbor pixels are identical, so we sample one.
+func computeLumaHorizontalPred(reconY []uint8, strideY, mbX, mbY int) uint8 {
+	return reconY[mbY*16*strideY+mbX*16-1]
+}
+
+// selectLumaMode picks the best I_16x16 luma prediction mode (0=Vert, 1=Horiz, 2=DC)
+// for a flat block with target value targetY.
+func selectLumaMode(reconY []uint8, strideY, mbX, mbY int, targetY uint8) (mode int, pred uint8) {
+	bestMode := 2
+	bestPred := computeLumaDCPred(reconY, strideY, mbX, mbY)
+	bestErr := absInt(int(targetY) - int(bestPred))
+
+	if mbY > 0 {
+		vPred := computeLumaVerticalPred(reconY, strideY, mbX, mbY)
+		vErr := absInt(int(targetY) - int(vPred))
+		if vErr < bestErr {
+			bestMode, bestPred, bestErr = 0, vPred, vErr
+		}
+	}
+
+	if mbX > 0 {
+		hPred := computeLumaHorizontalPred(reconY, strideY, mbX, mbY)
+		hErr := absInt(int(targetY) - int(hPred))
+		if hErr < bestErr {
+			bestMode, bestPred, _ = 1, hPred, hErr
+		}
+	}
+
+	return bestMode, bestPred
+}
+
+// computeChromaVerticalPreds4x4 returns uniform vertical predictions for each 4x4 sub-block.
+// For flat blocks, all top neighbor pixels within each 4x4 column are identical.
+func computeChromaVerticalPreds4x4(recon []uint8, strideC, mbX, mbY int) [4]uint8 {
+	val := recon[(mbY*8-1)*strideC+mbX*8]
+	return [4]uint8{val, val, val, val}
+}
+
+// computeChromaHorizontalPreds4x4 returns uniform horizontal predictions for each 4x4 sub-block.
+// For flat blocks, all left neighbor pixels within each 4x4 row are identical.
+func computeChromaHorizontalPreds4x4(recon []uint8, strideC, mbX, mbY int) [4]uint8 {
+	val := recon[mbY*8*strideC+mbX*8-1]
+	return [4]uint8{val, val, val, val}
+}
+
+// selectChromaMode picks the best chroma prediction mode (0=DC, 1=Horiz, 2=Vert)
+// for flat blocks with target values targetCb, targetCr.
+func selectChromaMode(reconCb, reconCr []uint8, strideC, mbX, mbY int,
+	targetCb, targetCr uint8) (mode int, cbPreds, crPreds [4]uint8) {
+
+	bestMode := 0
+	bestCbPreds := computeChromaDCPreds4x4(reconCb, strideC, mbX, mbY)
+	bestCrPreds := computeChromaDCPreds4x4(reconCr, strideC, mbX, mbY)
+	bestErr := chromaPredError(targetCb, targetCr, bestCbPreds, bestCrPreds)
+
+	if mbY > 0 {
+		vCb := computeChromaVerticalPreds4x4(reconCb, strideC, mbX, mbY)
+		vCr := computeChromaVerticalPreds4x4(reconCr, strideC, mbX, mbY)
+		vErr := chromaPredError(targetCb, targetCr, vCb, vCr)
+		if vErr < bestErr {
+			bestMode, bestCbPreds, bestCrPreds, bestErr = 2, vCb, vCr, vErr
+		}
+	}
+
+	if mbX > 0 {
+		hCb := computeChromaHorizontalPreds4x4(reconCb, strideC, mbX, mbY)
+		hCr := computeChromaHorizontalPreds4x4(reconCr, strideC, mbX, mbY)
+		hErr := chromaPredError(targetCb, targetCr, hCb, hCr)
+		if hErr < bestErr {
+			bestMode, bestCbPreds, bestCrPreds, _ = 1, hCb, hCr, hErr
+		}
+	}
+
+	return bestMode, bestCbPreds, bestCrPreds
+}
+
+// chromaPredError computes total absolute error across all 4 sub-blocks for both Cb and Cr.
+func chromaPredError(targetCb, targetCr uint8, cbPreds, crPreds [4]uint8) int {
+	total := 0
+	for i := 0; i < 4; i++ {
+		total += absInt(int(targetCb)-int(cbPreds[i])) + absInt(int(targetCr)-int(crPreds[i]))
+	}
+	return total
+}
+
+func absInt(v int) int {
+	if v < 0 {
+		return -v
+	}
+	return v
 }
 
 // computeChromaDCPreds4x4 computes per-sub-block chroma DC predictions,
