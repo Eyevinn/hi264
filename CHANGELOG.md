@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Adaptive intra prediction mode selection for I_16x16 encoder: selects best of Vertical, Horizontal, or DC mode per macroblock based on neighbor similarity, achieving zero residual when a neighbor matches the target color (71% CAVLC / 64% CABAC bitstream size reduction on `sweden.gridimg`)
 - Flexible color space support: BT.601 (default), BT.709, and BT.2020
 - Full-range and limited-range YCbCr conversion
 - H.264 SPS VUI parameters (colour_primaries, transfer_characteristics, matrix_coefficients, video_full_range_flag) written when non-default color space is used
@@ -18,6 +19,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Decoder extracts VUI color metadata from SPS and uses it for YCbCr→RGB conversion
 - `pkg/yuv.ColorSpace` type with `RGBToYCbCrCS()` and `YCbCrToRGBCS()` parameterized conversions
 - `pkg/yuv.ParseColorSpace()`, `ColorSpaceFromMatrixCoefficients()` helpers
+- `pkg/yuv.SolidGrid()` helper for creating uniform single-color grids from pixel dimensions
+- `-idr-and-skip` flag for hi264dec to opt in to P_Skip frame decoding (IDR-only by default)
+- hi264gen CLI validation error tests and `-smpte`/`-f` mutual exclusivity test
+
+### Fixed
+- `tools/verify_hi264gen.sh` now accounts for hi264dec's `_WxH_yuv420p` YUV output suffix
+
+### Changed
+- hi264dec now decodes only IDR frames by default, matching expected behavior for real-world MP4 files
 
 ## [0.8.0] - 2025-02-15
 

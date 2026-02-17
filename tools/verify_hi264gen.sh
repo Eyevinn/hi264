@@ -48,9 +48,9 @@ verify() {
     local h264="$TMPDIR/${name}.264"
     go run ./cmd/hi264gen -grid "$grid" $color_flags $cabac_flag -no-deblock -o "$h264"
 
-    # 2. Decode with hi264dec
-    local go_yuv="$TMPDIR/${name}_go.yuv"
-    go run ./cmd/hi264dec -no-deblock "$h264" "$go_yuv"
+    # 2. Decode with hi264dec (hi264dec adds _WxH_yuv420p suffix for .yuv)
+    local go_yuv="$TMPDIR/${name}_go_${width}x${height}_yuv420p.yuv"
+    go run ./cmd/hi264dec -no-deblock "$h264" "$TMPDIR/${name}_go.yuv"
 
     # 3. Decode with ffmpeg
     local ff_yuv="$TMPDIR/${name}_ff.yuv"
@@ -67,9 +67,9 @@ verify() {
         return
     fi
 
-    # 5. Generate expected YUV from hi264gen (raw output)
-    local expected_yuv="$TMPDIR/${name}_expected.yuv"
-    go run ./cmd/hi264gen -grid "$grid" $color_flags -o "$expected_yuv"
+    # 5. Generate expected YUV from hi264gen (raw output, also adds _WxH_yuv420p suffix)
+    local expected_yuv="$TMPDIR/${name}_expected_${width}x${height}_yuv420p.yuv"
+    go run ./cmd/hi264gen -grid "$grid" $color_flags -o "$TMPDIR/${name}_expected.yuv"
 
     # 6. Compare decoded vs expected (may differ due to quantization)
     if cmp -s "$go_yuv" "$expected_yuv"; then
