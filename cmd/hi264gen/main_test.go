@@ -365,8 +365,8 @@ func TestRunSMPTEExclusive(t *testing.T) {
 	dir := t.TempDir()
 	out := filepath.Join(dir, "test.264")
 
-	// -smpte with -grid should error
-	err := run([]string{appName, "-smpte", "-grid", "xy", "-w", "176", "-h", "80", "-text", "%d", "-o", out})
+	// -smpte with -gp should error
+	err := run([]string{appName, "-smpte", "-gp", "xy", "-w", "176", "-h", "80", "-text", "%d", "-o", out})
 	if err == nil {
 		t.Error("expected error for -smpte with -grid")
 	}
@@ -485,7 +485,7 @@ func TestRunBackgroundPattern(t *testing.T) {
 
 	out := filepath.Join(dir, "test.264")
 	err := run([]string{appName, "-w", "176", "-h", "80", "-n", "3", "-text", "%03d",
-		"-f", patternFile, "-o", out})
+		"-gi", patternFile, "-o", out})
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
@@ -519,7 +519,7 @@ func TestRunGridOnly(t *testing.T) {
 
 	out := filepath.Join(dir, "test.264")
 	// Grid-only mode: no -w/-h, frame size = 2x2 MBs = 32x32
-	err := run([]string{appName, "-f", patternFile, "-o", out})
+	err := run([]string{appName, "-gi", patternFile, "-o", out})
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
@@ -550,7 +550,7 @@ func TestRunGridOnlyCABAC(t *testing.T) {
 	}
 
 	out := filepath.Join(dir, "test.264")
-	err := run([]string{appName, "-f", patternFile, "-cabac", "-o", out})
+	err := run([]string{appName, "-gi", patternFile, "-cabac", "-o", out})
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
@@ -570,8 +570,8 @@ func TestRunGridOnlyWithFlags(t *testing.T) {
 	dir := t.TempDir()
 	out := filepath.Join(dir, "test.264")
 
-	// Grid-only mode using -grid/-c flags
-	err := run([]string{appName, "-grid", "xy,yx", "-c", "x=235,128,128", "-c", "y=16,128,128", "-o", out})
+	// Grid-only mode using -gp/-gc flags
+	err := run([]string{appName, "-gp", "xy,yx", "-gc", "x=235,128,128", "-gc", "y=16,128,128", "-o", out})
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
@@ -709,7 +709,7 @@ func TestRunSMPTEWithFileExclusive(t *testing.T) {
 	}
 	out := filepath.Join(dir, "test.264")
 
-	err := run([]string{appName, "-smpte", "-f", patternFile, "-w", "176", "-h", "80", "-text", "%d", "-o", out})
+	err := run([]string{appName, "-smpte", "-gi", patternFile, "-w", "176", "-h", "80", "-text", "%d", "-o", out})
 	if err == nil {
 		t.Error("expected error for -smpte with -f")
 	}
@@ -756,8 +756,8 @@ func TestRunValidationErrors(t *testing.T) {
 		}, "unknown output format"},
 		{"invalid fg", b("-fg", "abc"), "expected R,G,B"},
 		{"invalid bg", b("-bg", "1,2"), "expected R,G,B"},
-		{"f with grid", []string{
-			appName, "-f", "x.gridimg", "-grid", "xy", "-o", out,
+		{"gi with gp", []string{
+			appName, "-gi", "x.gridimg", "-gp", "xy", "-o", out,
 		}, "mutually exclusive"},
 	}
 
@@ -782,4 +782,73 @@ func countStartCodes(data []byte) int {
 		}
 	}
 	return count
+}
+
+func TestRunStdoutRequiresFormat(t *testing.T) {
+	err := run([]string{appName, "-smpte", "-w", "176", "-h", "80", "-o", "-"})
+	if err == nil {
+		t.Error("expected error for -o - without -f")
+	}
+	if !strings.Contains(err.Error(), "-f is required") {
+		t.Errorf("error %q should mention -f is required", err)
+	}
+}
+
+func TestRunStdoutWithFormat(t *testing.T) {
+	// Capture stdout by redirecting it
+	old := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	err := run([]string{appName, "-smpte", "-w", "176", "-h", "80", "-f", "264", "-o", "-"})
+
+	w.Close()
+	os.Stdout = old
+
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	var buf bytes.Buffer
+	if _, err := buf.ReadFrom(r); err != nil {
+		t.Fatalf("read stdout: %v", err)
+	}
+	data := buf.Bytes()
+
+	if !bytes.HasPrefix(data, []byte{0, 0, 0, 1}) {
+		t.Error("stdout output should start with Annex-B start code")
+	}
+	startCodes := countStartCodes(data)
+	if startCodes != 3 { // SPS + PPS + 1 IDR
+		t.Errorf("expected 3 NALUs, got %d", startCodes)
+	}
+}
+
+func TestRunFormatFlag(t *testing.T) {
+	dir := t.TempDir()
+	// Output file has no extension but -f specifies format
+	out := filepath.Join(dir, "output")
+
+	err := run([]string{appName, "-smpte", "-w", "176", "-h", "80", "-f", "264", "-o", out})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	data, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.HasPrefix(data, []byte{0, 0, 0, 1}) {
+		t.Error("output should start with Annex-B start code")
+	}
+}
+
+func TestRunInvalidFormat(t *testing.T) {
+	err := run([]string{appName, "-smpte", "-w", "176", "-h", "80", "-f", "bmp", "-o", "out.bmp"})
+	if err == nil {
+		t.Error("expected error for invalid -f format")
+	}
+	if !strings.Contains(err.Error(), "unknown format") {
+		t.Errorf("error %q should mention unknown format", err)
+	}
 }

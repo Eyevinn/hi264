@@ -33,7 +33,7 @@ verify() {
 
     local color_flags=""
     for c in "${colors[@]}"; do
-        color_flags="$color_flags -c $c"
+        color_flags="$color_flags -gc $c"
     done
 
     # Parse grid to determine dimensions
@@ -46,7 +46,7 @@ verify() {
 
     # 1. Generate .264 bitstream
     local h264="$TMPDIR/${name}.264"
-    go run ./cmd/hi264gen -grid "$grid" $color_flags $cabac_flag -no-deblock -o "$h264"
+    go run ./cmd/hi264gen -gp "$grid" $color_flags $cabac_flag -no-deblock -o "$h264"
 
     # 2. Decode with hi264dec (hi264dec adds _WxH_yuv420p suffix for .yuv)
     local go_yuv="$TMPDIR/${name}_go_${width}x${height}_yuv420p.yuv"
@@ -69,7 +69,7 @@ verify() {
 
     # 5. Generate expected YUV from hi264gen (raw output, also adds _WxH_yuv420p suffix)
     local expected_yuv="$TMPDIR/${name}_expected_${width}x${height}_yuv420p.yuv"
-    go run ./cmd/hi264gen -grid "$grid" $color_flags -o "$TMPDIR/${name}_expected.yuv"
+    go run ./cmd/hi264gen -gp "$grid" $color_flags -o "$TMPDIR/${name}_expected.yuv"
 
     # 6. Compare decoded vs expected (may differ due to quantization)
     if cmp -s "$go_yuv" "$expected_yuv"; then

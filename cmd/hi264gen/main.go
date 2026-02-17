@@ -5,16 +5,17 @@
 // with DC prediction. For raw output (.png, .jpg, .yuv, .y4m), the grid pattern
 // is rendered directly without H.264 encoding.
 //
-// In grid-only mode (-f or -grid/-c, no -w/-h), the frame size equals the grid
+// In grid-only mode (-gi or -gp/-gc, no -w/-h), the frame size equals the grid
 // size in macroblocks. With -w/-h, the pattern tiles to fill custom dimensions,
 // and -text adds a text overlay using format patterns.
 //
 // Usage:
 //
-//	hi264gen -f pattern.gridimg -o output.264
-//	hi264gen -f pattern.gridimg -w 176 -h 80 -n 10 -text "%03d" -o output.264
+//	hi264gen -gi pattern.gridimg -o output.264
+//	hi264gen -gi pattern.gridimg -w 176 -h 80 -n 10 -text "%03d" -o output.264
 //	hi264gen -w 176 -h 80 -n 10 -text "%03d" -o output.264
-//	hi264gen -f pattern.gridimg -o reference.png
+//	hi264gen -gi pattern.gridimg -o reference.png
+//	hi264gen -smpte -w 320 -h 240 -n 100 -text "%03d" -f 264 -o - | ffplay -i -
 package main
 
 import (
@@ -22,6 +23,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -40,18 +42,21 @@ var usg = `%s - generate H.264 bitstreams or raw images from grid patterns.
 
 Usage:
 
-  %s -f pattern.gridimg -o output.264
-  %s -f pattern.gridimg -w 176 -h 80 -n 10 -text "%%03d" -o output.264
+  %s -gi pattern.gridimg -o output.264
+  %s -gi pattern.gridimg -w 176 -h 80 -n 10 -text "%%03d" -o output.264
   %s -w 176 -h 80 -n 10 -text "%%03d" -o output.264
+  %s -smpte -w 320 -h 240 -n 100 -text "%%03d" -f 264 -o - | ffplay -i -
 
-Output format is detected from the file extension:
-  .264       H.264 Annex-B bitstream (SPS+PPS once, then N slices)
-  .mp4       Fragmented MP4 (CMAF-compatible, configurable fps and fragment duration)
-  .y4m       Y4M multi-frame file
-  .yuv       Raw YUV420 (auto-adds _WxH_yuv420p suffix)
-  .png       PNG image (numbered _NNNN if -n > 1)
-  .jpg/.jpeg JPEG image (numbered _NNNN if -n > 1, -q for quality)
+Output format is detected from the file extension, or set explicitly with -f:
+  264        H.264 Annex-B bitstream (SPS+PPS once, then N slices)
+  mp4        Fragmented MP4 (CMAF-compatible, configurable fps and fragment duration)
+  y4m        Y4M multi-frame file
+  yuv        Raw YUV420 (auto-adds _WxH_yuv420p suffix)
+  png        PNG image (numbered _NNNN if -n > 1)
+  jpg/jpeg   JPEG image (numbered _NNNN if -n > 1, -q for quality)
   %%          Numbered images (e.g. frame_%%03d.png or frame_%%03d.jpg)
+
+Use -o - to write to stdout (requires -f to set the format).
 
 Options:
 `
@@ -69,6 +74,7 @@ type options struct {
 	grid        string
 	colors      colorFlags
 	imgFile     string
+	format      string
 	rgb         bool
 	smpte       bool
 	width       int
@@ -96,10 +102,11 @@ type options struct {
 func parseOptions(fs *flag.FlagSet, args []string) (*options, error) {
 	var opts options
 	fs.BoolVar(&opts.version, "version", false, "Get hi264 version")
-	fs.StringVar(&opts.grid, "grid", "", "grid pattern (rows separated by commas)")
-	fs.Var(&opts.colors, "c", "color spec: char=v1,v2,v3 (repeatable)")
-	fs.StringVar(&opts.imgFile, "f", "", "image file (.gridimg, alternative to -grid/-c)")
-	fs.BoolVar(&opts.rgb, "rgb", false, "interpret -c color values as RGB")
+	fs.StringVar(&opts.grid, "gp", "", "grid pattern (rows separated by commas)")
+	fs.Var(&opts.colors, "gc", "color spec: char=Y,Cb,Cr (or R,G,B with -rgb) (repeatable)")
+	fs.StringVar(&opts.imgFile, "gi", "", "grid image file (.gridimg, alternative to -gp/-gc)")
+	fs.StringVar(&opts.format, "f", "", "output format (264, mp4, y4m, yuv, png, jpg); required with -o -")
+	fs.BoolVar(&opts.rgb, "rgb", false, "interpret -gc color values as RGB instead of YCbCr")
 	fs.BoolVar(&opts.smpte, "smpte", false, "use 75% SMPTE color bars as pattern")
 	fs.IntVar(&opts.width, "w", 0, "frame width in pixels (must be even; default: grid-derived)")
 	fs.IntVar(&opts.height, "h", 0, "frame height in pixels (must be even; default: grid-derived)")
@@ -122,7 +129,7 @@ func parseOptions(fs *flag.FlagSet, args []string) (*options, error) {
 	fs.BoolVar(&opts.fullRange, "full-range", false, "use full-range YCbCr (0-255)")
 	fs.StringVar(&opts.output, "o", "", "output file (required)")
 	fs.Usage = func() {
-		fmt.Fprintf(os.Stderr, usg, appName, appName, appName, appName)
+		fmt.Fprintf(os.Stderr, usg, appName, appName, appName, appName, appName)
 		fs.PrintDefaults()
 	}
 	err := fs.Parse(args[1:])
@@ -146,6 +153,54 @@ func parseRGBWithCS(s string, cs yuv.ColorSpace, rng yuv.Range) (yuv.Color, erro
 		rgb[i] = uint8(v)
 	}
 	return yuv.RGBToYCbCrCS(rgb[0], rgb[1], rgb[2], cs, rng), nil
+}
+
+type nopCloser struct{ io.Writer }
+
+func (nopCloser) Close() error { return nil }
+
+func openOutput(path string) (io.WriteCloser, error) {
+	if path == "-" {
+		return nopCloser{os.Stdout}, nil
+	}
+	return os.Create(path)
+}
+
+// resolveFormat determines the output format from -f flag or file extension.
+func resolveFormat(output, format string) (string, error) {
+	if format != "" {
+		f := strings.ToLower(strings.TrimPrefix(format, "."))
+		switch f {
+		case "264", "mp4", "y4m", "yuv", "png", "jpg", "jpeg":
+			return f, nil
+		default:
+			return "", fmt.Errorf("unknown format %q (use 264, mp4, y4m, yuv, png, or jpg)", f)
+		}
+	}
+	if output == "-" {
+		return "", fmt.Errorf("-f is required when writing to stdout (-o -)")
+	}
+	if strings.Contains(output, "%") {
+		return "pattern", nil
+	}
+	ext := strings.ToLower(filepath.Ext(output))
+	switch ext {
+	case ".264":
+		return "264", nil
+	case ".mp4":
+		return "mp4", nil
+	case ".y4m":
+		return "y4m", nil
+	case ".yuv":
+		return "yuv", nil
+	case ".png":
+		return "png", nil
+	case ".jpg", ".jpeg":
+		return "jpg", nil
+	default:
+		return "", fmt.Errorf("unknown output format %q"+
+			" (use .264, .mp4, .y4m, .yuv, .png, .jpg, or %% pattern; or set -f)", ext)
+	}
 }
 
 func main() {
@@ -179,10 +234,10 @@ func run(args []string) error {
 	}
 
 	if (opts.grid != "" || len(opts.colors) > 0) && opts.imgFile != "" {
-		return fmt.Errorf("-f and -grid/-c are mutually exclusive")
+		return fmt.Errorf("-gi and -gp/-gc are mutually exclusive")
 	}
 	if opts.smpte && (opts.imgFile != "" || opts.grid != "") {
-		return fmt.Errorf("-smpte is mutually exclusive with -f and -grid/-c")
+		return fmt.Errorf("-smpte is mutually exclusive with -gi and -gp/-gc")
 	}
 
 	// Parse color space early since it's needed for image file parsing
@@ -198,6 +253,7 @@ func run(args []string) error {
 	// Parse grid input (if any)
 	var patGrid *yuv.Grid
 	var patColors yuv.ColorMap
+	isStdout := opts.output == "-"
 	hasGridInput := opts.imgFile != "" || opts.grid != "" || opts.smpte
 
 	if opts.smpte {
@@ -237,10 +293,10 @@ func run(args []string) error {
 	// Validate: need either grid input or -w/-h with -text
 	if !hasGridInput && !tiled {
 		fs.Usage()
-		return fmt.Errorf("either grid input (-f or -grid/-c) or -w/-h with -text is required")
+		return fmt.Errorf("either grid input (-gi or -gp/-gc) or -w/-h with -text is required")
 	}
 	if !hasGridInput && tiled && opts.text == "" {
-		return fmt.Errorf("-text is required when using -w/-h without grid input")
+		return fmt.Errorf("-text is required when using -w/-h without grid input (-gi or -gp/-gc)")
 	}
 
 	if tiled {
@@ -329,32 +385,47 @@ func run(args []string) error {
 		disableDeblock = 1
 	}
 
-	// Detect output format from extension
-	ext := strings.ToLower(filepath.Ext(opts.output))
-	hasPct := strings.Contains(opts.output, "%")
+	// Resolve output format
+	outFmt, err := resolveFormat(opts.output, opts.format)
+	if err != nil {
+		return err
+	}
 
-	switch {
-	case ext == ".264":
+	// Validate stdout restrictions
+	if isStdout {
+		switch outFmt {
+		case "yuv":
+			return fmt.Errorf("yuv format cannot be used with stdout (adds _WxH suffix to filename)")
+		case "pattern":
+			return fmt.Errorf("pattern format cannot be used with stdout")
+		case "png", "jpg":
+			if opts.numFrames > 1 {
+				return fmt.Errorf("%s format with -n > 1 cannot be used with stdout", outFmt)
+			}
+		}
+	}
+
+	switch outFmt {
+	case "264":
 		return generateH264(opts, frameW, frameH, mbWidth, mbHeight, disableDeblock,
 			bgColor, fgColor, patGrid, patColors, tiled, textScale, textBg, cs, rng)
-	case ext == ".mp4":
+	case "mp4":
 		return generateMP4(opts, frameW, frameH, mbWidth, mbHeight, disableDeblock,
 			bgColor, fgColor, patGrid, patColors, tiled, textScale, textBg, cs, rng)
-	case ext == ".y4m":
+	case "y4m":
 		return generateY4M(opts, frameW, frameH, mbWidth, mbHeight,
 			bgColor, fgColor, patGrid, patColors, tiled, textScale, textBg, cs, rng)
-	case ext == ".yuv":
+	case "yuv":
 		return generateYUV(opts, frameW, frameH, mbWidth, mbHeight,
 			bgColor, fgColor, patGrid, patColors, tiled, textScale, textBg)
-	case hasPct:
+	case "pattern":
 		return generateFormattedImages(opts, frameW, frameH, mbWidth, mbHeight,
 			bgColor, fgColor, patGrid, patColors, tiled, textScale, textBg, cs, rng)
-	case ext == ".png" || ext == ".jpg" || ext == ".jpeg":
+	case "png", "jpg", "jpeg":
 		return generateNumberedImages(opts, frameW, frameH, mbWidth, mbHeight,
 			bgColor, fgColor, patGrid, patColors, tiled, textScale, textBg, cs, rng)
 	default:
-		return fmt.Errorf("unknown output format %q"+
-			" (use .264, .mp4, .y4m, .yuv, .png, .jpg, or %% pattern)", ext)
+		return fmt.Errorf("unknown output format %q", outFmt)
 	}
 }
 
@@ -409,7 +480,7 @@ func generateH264(opts *options, frameW, frameH, mbWidth, mbHeight, disableDeblo
 	bg, fg yuv.Color, patGrid *yuv.Grid, patColors yuv.ColorMap, tiled bool,
 	textScale int, textBg *yuv.Color, cs yuv.ColorSpace, rng yuv.Range) error {
 
-	f, err := os.Create(opts.output)
+	f, err := openOutput(opts.output)
 	if err != nil {
 		return err
 	}
@@ -471,7 +542,7 @@ func generateH264(opts *options, frameW, frameH, mbWidth, mbHeight, disableDeblo
 	if opts.bpp > 0 {
 		bppInfo = fmt.Sprintf(", bpp=%d", opts.bpp)
 	}
-	fmt.Printf("Wrote %d frames %dx%d (%s, QP=%d%s%s) to %s\n",
+	fmt.Fprintf(os.Stderr, "Wrote %d frames %dx%d (%s, QP=%d%s%s) to %s\n",
 		opts.numFrames, frameW, frameH, entropy, opts.qp, idrInfo, bppInfo, opts.output)
 	return nil
 }
@@ -488,7 +559,7 @@ func padSlice(slice []byte, bpp int, frameIdx int) ([]byte, error) {
 	return padded, nil
 }
 
-func generateH264AllIDR(f *os.File, opts *options, frameW, frameH, mbWidth, mbHeight, disableDeblock int,
+func generateH264AllIDR(f io.Writer, opts *options, frameW, frameH, mbWidth, mbHeight, disableDeblock int,
 	bg, fg yuv.Color, patGrid *yuv.Grid, patColors yuv.ColorMap, tiled bool,
 	textScale int, textBg *yuv.Color, cs yuv.ColorSpace, rng yuv.Range) error {
 
@@ -523,7 +594,7 @@ func generateH264AllIDR(f *os.File, opts *options, frameW, frameH, mbWidth, mbHe
 	return nil
 }
 
-func generateH264WithPSkip(f *os.File, opts *options, mbWidth, mbHeight int,
+func generateH264WithPSkip(f io.Writer, opts *options, mbWidth, mbHeight int,
 	bg, fg yuv.Color, enc *encode.FrameEncoder, patGrid *yuv.Grid, patColors yuv.ColorMap, tiled bool,
 	textScale int, textBg *yuv.Color) error {
 
@@ -572,7 +643,7 @@ func generateMP4(opts *options, frameW, frameH, mbWidth, mbHeight, disableDebloc
 	bg, fg yuv.Color, patGrid *yuv.Grid, patColors yuv.ColorMap, tiled bool,
 	textScale int, textBg *yuv.Color, cs yuv.ColorSpace, rng yuv.Range) error {
 
-	f, err := os.Create(opts.output)
+	f, err := openOutput(opts.output)
 	if err != nil {
 		return err
 	}
@@ -743,7 +814,7 @@ func generateMP4(opts *options, frameW, frameH, mbWidth, mbHeight, disableDebloc
 	if opts.bpp > 0 {
 		bppInfo = fmt.Sprintf(", bpp=%d", opts.bpp)
 	}
-	fmt.Printf("Wrote %d frames %dx%d (%s, QP=%d, %d fps, frag=%d%s%s) to %s\n",
+	fmt.Fprintf(os.Stderr, "Wrote %d frames %dx%d (%s, QP=%d, %d fps, frag=%d%s%s) to %s\n",
 		opts.numFrames, frameW, frameH, entropy, opts.qp, opts.fps, opts.fragDur, idrInfo, bppInfo, opts.output)
 	return nil
 }
@@ -752,7 +823,7 @@ func generateY4M(opts *options, frameW, frameH, mbWidth, mbHeight int,
 	bg, fg yuv.Color, patGrid *yuv.Grid, patColors yuv.ColorMap, tiled bool,
 	textScale int, textBg *yuv.Color, cs yuv.ColorSpace, rng yuv.Range) error {
 
-	f, err := os.Create(opts.output)
+	f, err := openOutput(opts.output)
 	if err != nil {
 		return err
 	}
@@ -779,7 +850,7 @@ func generateY4M(opts *options, frameW, frameH, mbWidth, mbHeight int,
 		}
 	}
 
-	fmt.Printf("Wrote %d frames %dx%d to %s\n",
+	fmt.Fprintf(os.Stderr, "Wrote %d frames %dx%d to %s\n",
 		opts.numFrames, frameW, frameH, opts.output)
 	return nil
 }
@@ -819,7 +890,7 @@ func generateFormattedImages(opts *options, frameW, frameH, mbWidth, mbHeight in
 		}
 	}
 
-	fmt.Printf("Wrote %d frames %dx%d to %s\n",
+	fmt.Fprintf(os.Stderr, "Wrote %d frames %dx%d to %s\n",
 		opts.numFrames, frameW, frameH, opts.output)
 	return nil
 }
@@ -852,7 +923,7 @@ func generateYUV(opts *options, frameW, frameH, mbWidth, mbHeight int,
 		}
 	}
 
-	fmt.Printf("Wrote %d frame(s) %dx%d to %s\n", opts.numFrames, frameW, frameH, outPath)
+	fmt.Fprintf(os.Stderr, "Wrote %d frame(s) %dx%d to %s\n", opts.numFrames, frameW, frameH, outPath)
 	return nil
 }
 
@@ -898,6 +969,6 @@ func generateNumberedImages(opts *options, frameW, frameH, mbWidth, mbHeight int
 		}
 	}
 
-	fmt.Printf("Wrote %d frame(s) %dx%d to %s\n", opts.numFrames, frameW, frameH, opts.output)
+	fmt.Fprintf(os.Stderr, "Wrote %d frame(s) %dx%d to %s\n", opts.numFrames, frameW, frameH, opts.output)
 	return nil
 }
