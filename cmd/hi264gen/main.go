@@ -74,6 +74,7 @@ type options struct {
 	grid        string
 	colors      colorFlags
 	imgFile     string
+	bgAnim      string
 	format      string
 	rgb         bool
 	smpte       bool
@@ -105,6 +106,7 @@ func parseOptions(fs *flag.FlagSet, args []string) (*options, error) {
 	fs.StringVar(&opts.grid, "gp", "", "grid pattern (rows separated by commas)")
 	fs.Var(&opts.colors, "gc", "color spec: char=Y,Cb,Cr (or R,G,B with -rgb) (repeatable)")
 	fs.StringVar(&opts.imgFile, "gi", "", "grid image file (.gridimg, alternative to -gp/-gc)")
+	fs.StringVar(&opts.bgAnim, "bg-anim", "", "1-bit animation file (.bitanim) for per-frame background")
 	fs.StringVar(&opts.format, "f", "", "output format (264, mp4, y4m, yuv, png, jpg); required with -o -")
 	fs.BoolVar(&opts.rgb, "rgb", false, "interpret -gc color values as RGB instead of YCbCr")
 	fs.BoolVar(&opts.smpte, "smpte", false, "use 75% SMPTE color bars as pattern")
@@ -239,6 +241,9 @@ func run(args []string) error {
 	if opts.smpte && (opts.imgFile != "" || opts.grid != "") {
 		return fmt.Errorf("-smpte is mutually exclusive with -gi and -gp/-gc")
 	}
+	if opts.bgAnim != "" && (opts.imgFile != "" || opts.grid != "" || opts.smpte) {
+		return fmt.Errorf("-bg-anim is mutually exclusive with -gi, -gp/-gc, and -smpte")
+	}
 
 	// Parse color space early since it's needed for image file parsing
 	cs, err := yuv.ParseColorSpace(opts.colorspace)
@@ -253,10 +258,24 @@ func run(args []string) error {
 	// Parse grid input (if any)
 	var patGrid *yuv.Grid
 	var patColors yuv.ColorMap
+	var anim *yuv.BitAnim
 	isStdout := opts.output == "-"
-	hasGridInput := opts.imgFile != "" || opts.grid != "" || opts.smpte
+	hasGridInput := opts.imgFile != "" || opts.grid != "" || opts.smpte || opts.bgAnim != ""
 
-	if opts.smpte {
+	if opts.bgAnim != "" {
+		var lerr error
+		anim, lerr = yuv.LoadBitAnim(opts.bgAnim, cs, rng)
+		if lerr != nil {
+			return fmt.Errorf("loading animation: %w", lerr)
+		}
+		// Default frame dimensions from animation if not specified
+		if opts.width == 0 {
+			opts.width = anim.Width * 16
+		}
+		if opts.height == 0 {
+			opts.height = anim.Height * 16
+		}
+	} else if opts.smpte {
 		// Deferred: SMPTE grid created after mbWidth is known.
 	} else if opts.imgFile != "" {
 		f, ferr := os.Open(opts.imgFile)
@@ -408,22 +427,22 @@ func run(args []string) error {
 	switch outFmt {
 	case "264":
 		return generateH264(opts, frameW, frameH, mbWidth, mbHeight, disableDeblock,
-			bgColor, fgColor, patGrid, patColors, tiled, textScale, textBg, cs, rng)
+			bgColor, fgColor, patGrid, patColors, anim, tiled, textScale, textBg, cs, rng)
 	case "mp4":
 		return generateMP4(opts, frameW, frameH, mbWidth, mbHeight, disableDeblock,
-			bgColor, fgColor, patGrid, patColors, tiled, textScale, textBg, cs, rng)
+			bgColor, fgColor, patGrid, patColors, anim, tiled, textScale, textBg, cs, rng)
 	case "y4m":
 		return generateY4M(opts, frameW, frameH, mbWidth, mbHeight,
-			bgColor, fgColor, patGrid, patColors, tiled, textScale, textBg, cs, rng)
+			bgColor, fgColor, patGrid, patColors, anim, tiled, textScale, textBg, cs, rng)
 	case "yuv":
 		return generateYUV(opts, frameW, frameH, mbWidth, mbHeight,
-			bgColor, fgColor, patGrid, patColors, tiled, textScale, textBg)
+			bgColor, fgColor, patGrid, patColors, anim, tiled, textScale, textBg)
 	case "pattern":
 		return generateFormattedImages(opts, frameW, frameH, mbWidth, mbHeight,
-			bgColor, fgColor, patGrid, patColors, tiled, textScale, textBg, cs, rng)
+			bgColor, fgColor, patGrid, patColors, anim, tiled, textScale, textBg, cs, rng)
 	case "png", "jpg", "jpeg":
 		return generateNumberedImages(opts, frameW, frameH, mbWidth, mbHeight,
-			bgColor, fgColor, patGrid, patColors, tiled, textScale, textBg, cs, rng)
+			bgColor, fgColor, patGrid, patColors, anim, tiled, textScale, textBg, cs, rng)
 	default:
 		return fmt.Errorf("unknown output format %q", outFmt)
 	}
@@ -476,8 +495,18 @@ func buildFrameGrid(i int, patGrid *yuv.Grid, patColors yuv.ColorMap,
 	return grid, colors, nil
 }
 
+// animPat returns per-frame pattern grid/colors from the animation,
+// or the static pattern when no animation is active.
+func animPat(i int, patGrid *yuv.Grid, patColors yuv.ColorMap,
+	anim *yuv.BitAnim, mbW, mbH int) (*yuv.Grid, yuv.ColorMap) {
+	if anim != nil {
+		return anim.Frame(i, mbW, mbH)
+	}
+	return patGrid, patColors
+}
+
 func generateH264(opts *options, frameW, frameH, mbWidth, mbHeight, disableDeblock int,
-	bg, fg yuv.Color, patGrid *yuv.Grid, patColors yuv.ColorMap, tiled bool,
+	bg, fg yuv.Color, patGrid *yuv.Grid, patColors yuv.ColorMap, anim *yuv.BitAnim, tiled bool,
 	textScale int, textBg *yuv.Color, cs yuv.ColorSpace, rng yuv.Range) error {
 
 	f, err := openOutput(opts.output)
@@ -491,7 +520,8 @@ func generateH264(opts *options, frameW, frameH, mbWidth, mbHeight, disableDeblo
 		maxRef = 1
 	}
 
-	grid, colors, err := buildFrameGrid(0, patGrid, patColors,
+	pg, pc := animPat(0, patGrid, patColors, anim, mbWidth, mbHeight)
+	grid, colors, err := buildFrameGrid(0, pg, pc,
 		mbWidth, mbHeight, textScale, opts.fps, opts.text, bg, fg, textBg, tiled)
 	if err != nil {
 		return err
@@ -521,10 +551,10 @@ func generateH264(opts *options, frameW, frameH, mbWidth, mbHeight, disableDeblo
 
 	if opts.idrInterval > 0 {
 		err = generateH264WithPSkip(f, opts, mbWidth, mbHeight,
-			bg, fg, enc, patGrid, patColors, tiled, textScale, textBg)
+			bg, fg, enc, patGrid, patColors, anim, tiled, textScale, textBg)
 	} else {
 		err = generateH264AllIDR(f, opts, frameW, frameH, mbWidth, mbHeight, disableDeblock,
-			bg, fg, patGrid, patColors, tiled, textScale, textBg, cs, rng)
+			bg, fg, patGrid, patColors, anim, tiled, textScale, textBg, cs, rng)
 	}
 	if err != nil {
 		return err
@@ -560,11 +590,12 @@ func padSlice(slice []byte, bpp int, frameIdx int) ([]byte, error) {
 }
 
 func generateH264AllIDR(f io.Writer, opts *options, frameW, frameH, mbWidth, mbHeight, disableDeblock int,
-	bg, fg yuv.Color, patGrid *yuv.Grid, patColors yuv.ColorMap, tiled bool,
+	bg, fg yuv.Color, patGrid *yuv.Grid, patColors yuv.ColorMap, anim *yuv.BitAnim, tiled bool,
 	textScale int, textBg *yuv.Color, cs yuv.ColorSpace, rng yuv.Range) error {
 
 	for i := range opts.numFrames {
-		grid, colors, err := buildFrameGrid(i, patGrid, patColors,
+		pg, pc := animPat(i, patGrid, patColors, anim, mbWidth, mbHeight)
+		grid, colors, err := buildFrameGrid(i, pg, pc,
 			mbWidth, mbHeight, textScale, opts.fps, opts.text, bg, fg, textBg, tiled)
 		if err != nil {
 			return err
@@ -595,15 +626,16 @@ func generateH264AllIDR(f io.Writer, opts *options, frameW, frameH, mbWidth, mbH
 }
 
 func generateH264WithPSkip(f io.Writer, opts *options, mbWidth, mbHeight int,
-	bg, fg yuv.Color, enc *encode.FrameEncoder, patGrid *yuv.Grid, patColors yuv.ColorMap, tiled bool,
-	textScale int, textBg *yuv.Color) error {
+	bg, fg yuv.Color, enc *encode.FrameEncoder, patGrid *yuv.Grid, patColors yuv.ColorMap,
+	anim *yuv.BitAnim, tiled bool, textScale int, textBg *yuv.Color) error {
 
 	idrPicID := uint32(0)
 	frameNum := uint32(0)
 
 	for i := range opts.numFrames {
 		if i%opts.idrInterval == 0 {
-			grid, colors, err := buildFrameGrid(i, patGrid, patColors,
+			pg, pc := animPat(i, patGrid, patColors, anim, mbWidth, mbHeight)
+			grid, colors, err := buildFrameGrid(i, pg, pc,
 				mbWidth, mbHeight, textScale, opts.fps, opts.text, bg, fg, textBg, tiled)
 			if err != nil {
 				return err
@@ -640,7 +672,7 @@ func generateH264WithPSkip(f io.Writer, opts *options, mbWidth, mbHeight int,
 }
 
 func generateMP4(opts *options, frameW, frameH, mbWidth, mbHeight, disableDeblock int,
-	bg, fg yuv.Color, patGrid *yuv.Grid, patColors yuv.ColorMap, tiled bool,
+	bg, fg yuv.Color, patGrid *yuv.Grid, patColors yuv.ColorMap, anim *yuv.BitAnim, tiled bool,
 	textScale int, textBg *yuv.Color, cs yuv.ColorSpace, rng yuv.Range) error {
 
 	f, err := openOutput(opts.output)
@@ -678,7 +710,8 @@ func generateMP4(opts *options, frameW, frameH, mbWidth, mbHeight, disableDebloc
 	}
 
 	// Create encoder for frame generation
-	grid, colors, err := buildFrameGrid(0, patGrid, patColors,
+	pg0, pc0 := animPat(0, patGrid, patColors, anim, mbWidth, mbHeight)
+	grid, colors, err := buildFrameGrid(0, pg0, pc0,
 		mbWidth, mbHeight, textScale, opts.fps, opts.text, bg, fg, textBg, tiled)
 	if err != nil {
 		return err
@@ -708,7 +741,8 @@ func generateMP4(opts *options, frameW, frameH, mbWidth, mbHeight, disableDebloc
 		frameNum := uint32(0)
 		for i := range opts.numFrames {
 			if i%opts.idrInterval == 0 {
-				g, c, err := buildFrameGrid(i, patGrid, patColors,
+				pg, pc := animPat(i, patGrid, patColors, anim, mbWidth, mbHeight)
+				g, c, err := buildFrameGrid(i, pg, pc,
 					mbWidth, mbHeight, textScale, opts.fps, opts.text, bg, fg, textBg, tiled)
 				if err != nil {
 					return err
@@ -739,7 +773,8 @@ func generateMP4(opts *options, frameW, frameH, mbWidth, mbHeight, disableDebloc
 		}
 	} else {
 		for i := range opts.numFrames {
-			g, c, err := buildFrameGrid(i, patGrid, patColors,
+			pg, pc := animPat(i, patGrid, patColors, anim, mbWidth, mbHeight)
+			g, c, err := buildFrameGrid(i, pg, pc,
 				mbWidth, mbHeight, textScale, opts.fps, opts.text, bg, fg, textBg, tiled)
 			if err != nil {
 				return err
@@ -820,7 +855,7 @@ func generateMP4(opts *options, frameW, frameH, mbWidth, mbHeight, disableDebloc
 }
 
 func generateY4M(opts *options, frameW, frameH, mbWidth, mbHeight int,
-	bg, fg yuv.Color, patGrid *yuv.Grid, patColors yuv.ColorMap, tiled bool,
+	bg, fg yuv.Color, patGrid *yuv.Grid, patColors yuv.ColorMap, anim *yuv.BitAnim, tiled bool,
 	textScale int, textBg *yuv.Color, cs yuv.ColorSpace, rng yuv.Range) error {
 
 	f, err := openOutput(opts.output)
@@ -834,7 +869,8 @@ func generateY4M(opts *options, frameW, frameH, mbWidth, mbHeight int,
 	}
 
 	for i := range opts.numFrames {
-		grid, colors, err := buildFrameGrid(i, patGrid, patColors,
+		pg, pc := animPat(i, patGrid, patColors, anim, mbWidth, mbHeight)
+		grid, colors, err := buildFrameGrid(i, pg, pc,
 			mbWidth, mbHeight, textScale, opts.fps, opts.text, bg, fg, textBg, tiled)
 		if err != nil {
 			return err
@@ -856,14 +892,15 @@ func generateY4M(opts *options, frameW, frameH, mbWidth, mbHeight int,
 }
 
 func generateFormattedImages(opts *options, frameW, frameH, mbWidth, mbHeight int,
-	bg, fg yuv.Color, patGrid *yuv.Grid, patColors yuv.ColorMap, tiled bool,
+	bg, fg yuv.Color, patGrid *yuv.Grid, patColors yuv.ColorMap, anim *yuv.BitAnim, tiled bool,
 	textScale int, textBg *yuv.Color, cs yuv.ColorSpace, rng yuv.Range) error {
 
 	ext := strings.ToLower(filepath.Ext(opts.output))
 	isJPEG := ext == ".jpg" || ext == ".jpeg"
 
 	for i := range opts.numFrames {
-		grid, colors, err := buildFrameGrid(i, patGrid, patColors,
+		pg, pc := animPat(i, patGrid, patColors, anim, mbWidth, mbHeight)
+		grid, colors, err := buildFrameGrid(i, pg, pc,
 			mbWidth, mbHeight, textScale, opts.fps, opts.text, bg, fg, textBg, tiled)
 		if err != nil {
 			return err
@@ -896,7 +933,7 @@ func generateFormattedImages(opts *options, frameW, frameH, mbWidth, mbHeight in
 }
 
 func generateYUV(opts *options, frameW, frameH, mbWidth, mbHeight int,
-	bg, fg yuv.Color, patGrid *yuv.Grid, patColors yuv.ColorMap, tiled bool,
+	bg, fg yuv.Color, patGrid *yuv.Grid, patColors yuv.ColorMap, anim *yuv.BitAnim, tiled bool,
 	textScale int, textBg *yuv.Color) error {
 
 	outPath := yuv.AddSuffix(opts.output, frameW, frameH)
@@ -907,7 +944,8 @@ func generateYUV(opts *options, frameW, frameH, mbWidth, mbHeight int,
 	defer f.Close()
 
 	for i := range opts.numFrames {
-		grid, colors, err := buildFrameGrid(i, patGrid, patColors,
+		pg, pc := animPat(i, patGrid, patColors, anim, mbWidth, mbHeight)
+		grid, colors, err := buildFrameGrid(i, pg, pc,
 			mbWidth, mbHeight, textScale, opts.fps, opts.text, bg, fg, textBg, tiled)
 		if err != nil {
 			return err
@@ -928,14 +966,15 @@ func generateYUV(opts *options, frameW, frameH, mbWidth, mbHeight int,
 }
 
 func generateNumberedImages(opts *options, frameW, frameH, mbWidth, mbHeight int,
-	bg, fg yuv.Color, patGrid *yuv.Grid, patColors yuv.ColorMap, tiled bool,
+	bg, fg yuv.Color, patGrid *yuv.Grid, patColors yuv.ColorMap, anim *yuv.BitAnim, tiled bool,
 	textScale int, textBg *yuv.Color, cs yuv.ColorSpace, rng yuv.Range) error {
 
 	ext := strings.ToLower(filepath.Ext(opts.output))
 	isJPEG := ext == ".jpg" || ext == ".jpeg"
 
 	for i := range opts.numFrames {
-		grid, colors, err := buildFrameGrid(i, patGrid, patColors,
+		pg, pc := animPat(i, patGrid, patColors, anim, mbWidth, mbHeight)
+		grid, colors, err := buildFrameGrid(i, pg, pc,
 			mbWidth, mbHeight, textScale, opts.fps, opts.text, bg, fg, textBg, tiled)
 		if err != nil {
 			return err
