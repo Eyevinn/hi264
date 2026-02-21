@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Minimal Go version 1.24
 - Ran go fix to modernize the code
+- hi264gen uses `bufio.Writer`, reducing write syscalls by ~87%
 
 ## [0.9.0] - 2026-02-17
 

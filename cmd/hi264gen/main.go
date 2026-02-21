@@ -19,6 +19,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"errors"
 	"flag"
@@ -158,15 +159,33 @@ func parseRGBWithCS(s string, cs yuv.ColorSpace, rng yuv.Range) (yuv.Color, erro
 	return yuv.RGBToYCbCrCS(rgb[0], rgb[1], rgb[2], cs, rng), nil
 }
 
-type nopCloser struct{ io.Writer }
+// bufferedWriteCloser wraps a bufio.Writer around a file, flushing on Close.
+type bufferedWriteCloser struct {
+	bw     *bufio.Writer
+	closer io.Closer // nil for stdout
+}
 
-func (nopCloser) Close() error { return nil }
+func (b *bufferedWriteCloser) Write(p []byte) (int, error) { return b.bw.Write(p) }
+
+func (b *bufferedWriteCloser) Close() error {
+	if err := b.bw.Flush(); err != nil {
+		return err
+	}
+	if b.closer != nil {
+		return b.closer.Close()
+	}
+	return nil
+}
 
 func openOutput(path string) (io.WriteCloser, error) {
 	if path == "-" {
-		return nopCloser{os.Stdout}, nil
+		return &bufferedWriteCloser{bw: bufio.NewWriter(os.Stdout)}, nil
 	}
-	return os.Create(path)
+	f, err := os.Create(path)
+	if err != nil {
+		return nil, err
+	}
+	return &bufferedWriteCloser{bw: bufio.NewWriter(f), closer: f}, nil
 }
 
 // resolveFormat determines the output format from -f flag or file extension.
