@@ -26,6 +26,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime/pprof"
 	"strconv"
 	"strings"
 
@@ -97,6 +98,7 @@ type options struct {
 	colorspace  string
 	fullRange   bool
 	output      string
+	cpuProfile  string
 }
 
 func parseOptions(fs *flag.FlagSet, args []string) (*options, error) {
@@ -127,6 +129,7 @@ func parseOptions(fs *flag.FlagSet, args []string) (*options, error) {
 	fs.IntVar(&opts.fragDur, "frag-dur", 25, "fragment duration in frames for MP4 output")
 	fs.StringVar(&opts.colorspace, "colorspace", "bt601", "color space (bt601, bt709, bt2020)")
 	fs.BoolVar(&opts.fullRange, "full-range", false, "use full-range YCbCr (0-255)")
+	fs.StringVar(&opts.cpuProfile, "cpuprofile", "", "write CPU profile to file")
 	fs.StringVar(&opts.output, "o", "", "output file (required)")
 	fs.Usage = func() {
 		fmt.Fprintf(os.Stderr, usg, appName, appName, appName, appName, appName)
@@ -218,6 +221,18 @@ func run(args []string) error {
 			return nil
 		}
 		return err
+	}
+
+	if opts.cpuProfile != "" {
+		f, err := os.Create(opts.cpuProfile)
+		if err != nil {
+			return fmt.Errorf("create CPU profile: %w", err)
+		}
+		defer f.Close()
+		if err := pprof.StartCPUProfile(f); err != nil {
+			return fmt.Errorf("start CPU profile: %w", err)
+		}
+		defer pprof.StopCPUProfile()
 	}
 
 	if opts.version {
