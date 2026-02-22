@@ -24,7 +24,7 @@ func TestSPSRoundTrip(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			rbsp := EncodeSPS(tt.width, tt.height, 0, 0, 0)
+			rbsp := EncodeSPS(tt.width, tt.height, 0, 30, 0, 0)
 
 			// Construct NALU: NAL header + RBSP
 			nalHeader := byte(0x67) // nal_ref_idc=3, type=7 (SPS)
@@ -72,9 +72,9 @@ func TestSPSCropping(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			var rbsp []byte
 			if tt.profile == 77 {
-				rbsp = EncodeSPSMain(tt.width, tt.height, 0, 0, 0)
+				rbsp = EncodeSPSMain(tt.width, tt.height, 0, 30, 0, 0)
 			} else {
-				rbsp = EncodeSPS(tt.width, tt.height, 0, 0, 0)
+				rbsp = EncodeSPS(tt.width, tt.height, 0, 30, 0, 0)
 			}
 
 			nalHeader := byte(0x67)
@@ -129,9 +129,9 @@ func TestSPSVUIColorSpace(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			var rbsp []byte
 			if tt.profile == 77 {
-				rbsp = EncodeSPSMain(320, 240, 0, tt.cs, tt.rng)
+				rbsp = EncodeSPSMain(320, 240, 0, 30, tt.cs, tt.rng)
 			} else {
-				rbsp = EncodeSPS(320, 240, 0, tt.cs, tt.rng)
+				rbsp = EncodeSPS(320, 240, 0, 30, tt.cs, tt.rng)
 			}
 
 			nalHeader := byte(0x67)

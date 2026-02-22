@@ -12,6 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Ran go fix to modernize the code
 - hi264gen uses `bufio.Writer`, reducing write syscalls by ~87%
 
+### Fixed
+- signal proper level depending on resolution, fps, and bitrate
+
 ## [0.9.0] - 2026-02-17
 
 ### Added
