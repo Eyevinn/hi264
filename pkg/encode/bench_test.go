@@ -2,6 +2,7 @@ package encode
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 
 	"github.com/Eyevinn/hi264/pkg/yuv"
@@ -46,18 +47,18 @@ func BenchmarkEncodeCABAC2x2(b *testing.B) {
 func BenchmarkEncodeCAVLC10x6(b *testing.B) {
 	row1 := "xyxyxyxyxy"
 	row2 := "yxyxyxyxyx"
-	gridStr := ""
-	for i := 0; i < 6; i++ {
+	var gridStr strings.Builder
+	for i := range 6 {
 		if i > 0 {
-			gridStr += ","
+			gridStr.WriteString(",")
 		}
 		if i%2 == 0 {
-			gridStr += row1
+			gridStr.WriteString(row1)
 		} else {
-			gridStr += row2
+			gridStr.WriteString(row2)
 		}
 	}
-	enc := makeEncoder(gridStr, false)
+	enc := makeEncoder(gridStr.String(), false)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_, err := enc.Encode()
@@ -71,18 +72,18 @@ func BenchmarkEncodeCAVLC10x6(b *testing.B) {
 func BenchmarkEncodeCABAC10x6(b *testing.B) {
 	row1 := "xyxyxyxyxy"
 	row2 := "yxyxyxyxyx"
-	gridStr := ""
-	for i := 0; i < 6; i++ {
+	var gridStr strings.Builder
+	for i := range 6 {
 		if i > 0 {
-			gridStr += ","
+			gridStr.WriteString(",")
 		}
 		if i%2 == 0 {
-			gridStr += row1
+			gridStr.WriteString(row1)
 		} else {
-			gridStr += row2
+			gridStr.WriteString(row2)
 		}
 	}
-	enc := makeEncoder(gridStr, true)
+	enc := makeEncoder(gridStr.String(), true)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_, err := enc.Encode()

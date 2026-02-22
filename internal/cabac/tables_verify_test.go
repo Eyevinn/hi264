@@ -77,8 +77,8 @@ func TestRangeTabLPS_AgainstStandard(t *testing.T) {
 	}
 
 	mismatches := 0
-	for pStateIdx := 0; pStateIdx < 64; pStateIdx++ {
-		for qIdx := 0; qIdx < 4; qIdx++ {
+	for pStateIdx := range 64 {
+		for qIdx := range 4 {
 			got := rangeTabLPS[pStateIdx][qIdx]
 			want := standard[pStateIdx][qIdx]
 			if got != want {

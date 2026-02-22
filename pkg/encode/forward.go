@@ -9,7 +9,7 @@ func ForwardHadamard4x4(dc [16]int32) [16]int32 {
 	var temp [16]int32
 
 	// 1D Hadamard on rows
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		s0 := dc[i*4+0]
 		s1 := dc[i*4+1]
 		s2 := dc[i*4+2]
@@ -23,7 +23,7 @@ func ForwardHadamard4x4(dc [16]int32) [16]int32 {
 
 	// 1D Hadamard on columns, with /2 normalization
 	var result [16]int32
-	for j := 0; j < 4; j++ {
+	for j := range 4 {
 		f0 := temp[0*4+j]
 		f1 := temp[1*4+j]
 		f2 := temp[2*4+j]
@@ -71,7 +71,7 @@ func Quantize4x4(coeffs [16]int32, qp int) [16]int32 {
 	qBits := 15 + qpPer
 	add := int32(1) << uint(qBits) / 3 // rounding for intra
 
-	for i := 0; i < 16; i++ {
+	for i := range 16 {
 		row := i / 4
 		col := i % 4
 		v := levelScaleIdx(row, col)
@@ -103,7 +103,7 @@ func QuantizeDC4x4(coeffs [16]int32, qp int, wsDC int32) [16]int32 {
 	qBits := 15 + qpPer + 1 // extra +1 for DC after Hadamard normalization
 	add := int32(1) << uint(qBits) / 3
 
-	for i := 0; i < 16; i++ {
+	for i := range 16 {
 		sign := int32(1)
 		c := coeffs[i]
 		if c < 0 {
@@ -125,7 +125,7 @@ func QuantizeChromaDC2x2(coeffs [4]int32, qpc int) [4]int32 {
 	qBits := 15 + qpPer + 1
 	add := int32(1) << uint(qBits) / 3
 
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		sign := int32(1)
 		c := coeffs[i]
 		if c < 0 {

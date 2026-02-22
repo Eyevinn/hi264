@@ -40,14 +40,14 @@ func Predict16x16(mode int, top, left []uint8, topLeft uint8) [16][16]uint8 {
 
 	switch mode {
 	case Intra16x16Vertical:
-		for y := 0; y < 16; y++ {
-			for x := 0; x < 16; x++ {
+		for y := range 16 {
+			for x := range 16 {
 				pred[y][x] = top[x]
 			}
 		}
 	case Intra16x16Horizontal:
-		for y := 0; y < 16; y++ {
-			for x := 0; x < 16; x++ {
+		for y := range 16 {
+			for x := range 16 {
 				pred[y][x] = left[y]
 			}
 		}
@@ -56,12 +56,12 @@ func Predict16x16(mode int, top, left []uint8, topLeft uint8) [16][16]uint8 {
 		hasTop := top != nil
 		hasLeft := left != nil
 		if hasTop {
-			for x := 0; x < 16; x++ {
+			for x := range 16 {
 				sum += int(top[x])
 			}
 		}
 		if hasLeft {
-			for y := 0; y < 16; y++ {
+			for y := range 16 {
 				sum += int(left[y])
 			}
 		}
@@ -73,15 +73,15 @@ func Predict16x16(mode int, top, left []uint8, topLeft uint8) [16][16]uint8 {
 		} else {
 			dc = 128
 		}
-		for y := 0; y < 16; y++ {
-			for x := 0; x < 16; x++ {
+		for y := range 16 {
+			for x := range 16 {
 				pred[y][x] = dc
 			}
 		}
 	case Intra16x16Plane:
 		iH := 0
 		iV := 0
-		for x := 0; x < 8; x++ {
+		for x := range 8 {
 			var pLeft int
 			if 6-x >= 0 {
 				pLeft = int(top[6-x])
@@ -90,7 +90,7 @@ func Predict16x16(mode int, top, left []uint8, topLeft uint8) [16][16]uint8 {
 			}
 			iH += (x + 1) * (int(top[8+x]) - pLeft)
 		}
-		for y := 0; y < 8; y++ {
+		for y := range 8 {
 			var pAbove int
 			if 6-y >= 0 {
 				pAbove = int(left[6-y])
@@ -103,8 +103,8 @@ func Predict16x16(mode int, top, left []uint8, topLeft uint8) [16][16]uint8 {
 		b := (5*iH + 32) >> 6
 		c := (5*iV + 32) >> 6
 
-		for y := 0; y < 16; y++ {
-			for x := 0; x < 16; x++ {
+		for y := range 16 {
+			for x := range 16 {
 				val := (a + b*(x-7) + c*(y-7) + 16) >> 5
 				pred[y][x] = clip8(val)
 			}
@@ -138,14 +138,14 @@ func Predict4x4(mode int, ref [13]uint8, leftAvail, topAvail bool) [4][4]uint8 {
 
 	switch mode {
 	case Intra4x4Vertical:
-		for y := 0; y < 4; y++ {
+		for y := range 4 {
 			pred[y][0] = uint8(t0)
 			pred[y][1] = uint8(t1)
 			pred[y][2] = uint8(t2)
 			pred[y][3] = uint8(t3)
 		}
 	case Intra4x4Horizontal:
-		for x := 0; x < 4; x++ {
+		for x := range 4 {
 			pred[0][x] = uint8(l0)
 			pred[1][x] = uint8(l1)
 			pred[2][x] = uint8(l2)
@@ -163,8 +163,8 @@ func Predict4x4(mode int, ref [13]uint8, leftAvail, topAvail bool) [4][4]uint8 {
 		default:
 			dc = 128
 		}
-		for y := 0; y < 4; y++ {
-			for x := 0; x < 4; x++ {
+		for y := range 4 {
+			for x := range 4 {
 				pred[y][x] = dc
 			}
 		}
@@ -296,14 +296,14 @@ func Predict8x8(mode int, ref [25]uint8, leftAvail, topAvail bool) [8][8]uint8 {
 
 	switch mode {
 	case 0: // Vertical
-		for y := 0; y < 8; y++ {
-			for x := 0; x < 8; x++ {
+		for y := range 8 {
+			for x := range 8 {
 				pred[y][x] = uint8(t[x])
 			}
 		}
 	case 1: // Horizontal
-		for y := 0; y < 8; y++ {
-			for x := 0; x < 8; x++ {
+		for y := range 8 {
+			for x := range 8 {
 				pred[y][x] = uint8(l[y])
 			}
 		}
@@ -312,33 +312,33 @@ func Predict8x8(mode int, ref [25]uint8, leftAvail, topAvail bool) [8][8]uint8 {
 		switch {
 		case topAvail && leftAvail:
 			sum := 0
-			for i := 0; i < 8; i++ {
+			for i := range 8 {
 				sum += t[i] + l[i]
 			}
 			dc = uint8((sum + 8) >> 4)
 		case topAvail:
 			sum := 0
-			for i := 0; i < 8; i++ {
+			for i := range 8 {
 				sum += t[i]
 			}
 			dc = uint8((sum + 4) >> 3)
 		case leftAvail:
 			sum := 0
-			for i := 0; i < 8; i++ {
+			for i := range 8 {
 				sum += l[i]
 			}
 			dc = uint8((sum + 4) >> 3)
 		default:
 			dc = 128
 		}
-		for y := 0; y < 8; y++ {
-			for x := 0; x < 8; x++ {
+		for y := range 8 {
+			for x := range 8 {
 				pred[y][x] = dc
 			}
 		}
 	case 3: // Diagonal Down-Left
-		for y := 0; y < 8; y++ {
-			for x := 0; x < 8; x++ {
+		for y := range 8 {
+			for x := range 8 {
 				if x+y == 14 {
 					pred[y][x] = uint8((t[14] + 3*t[15] + 2) >> 2)
 				} else {
@@ -353,8 +353,8 @@ func Predict8x8(mode int, ref [25]uint8, leftAvail, topAvail bool) [8][8]uint8 {
 	case 6: // Horizontal-Down
 		predict8x8HorizontalDown(&pred, l, tl, t)
 	case 7: // Vertical-Left
-		for y := 0; y < 8; y++ {
-			for x := 0; x < 8; x++ {
+		for y := range 8 {
+			for x := range 8 {
 				if y%2 == 0 {
 					pred[y][x] = uint8((t[x+y/2] + t[x+y/2+1] + 1) >> 1)
 				} else {
@@ -372,8 +372,8 @@ func Predict8x8(mode int, ref [25]uint8, leftAvail, topAvail bool) [8][8]uint8 {
 func predict8x8DiagDownRight(pred *[8][8]uint8, l [8]int, tl int, t [16]int) {
 	// Build combined diagonal reference: diagonal samples from bottom-left to top-right
 	// d[-7..0..7] where d[0]=tl, d[k>0]=t[k-1], d[k<0]=l[-k-1]
-	for y := 0; y < 8; y++ {
-		for x := 0; x < 8; x++ {
+	for y := range 8 {
+		for x := range 8 {
 			d := x - y // diagonal offset
 			var p0, p1, p2 int
 			p1 = diagSample(d, l[:], tl, t[:])
@@ -395,8 +395,8 @@ func diagSample(d int, l []int, tl int, t []int) int {
 }
 
 func predict8x8VerticalRight(pred *[8][8]uint8, l [8]int, tl int, t [16]int) {
-	for y := 0; y < 8; y++ {
-		for x := 0; x < 8; x++ {
+	for y := range 8 {
+		for x := range 8 {
 			zVR := 2*x - y
 			if zVR >= 0 && zVR%2 == 0 {
 				i := x - (y >> 1)
@@ -430,8 +430,8 @@ func predict8x8VerticalRight(pred *[8][8]uint8, l [8]int, tl int, t [16]int) {
 }
 
 func predict8x8HorizontalDown(pred *[8][8]uint8, l [8]int, tl int, t [16]int) {
-	for y := 0; y < 8; y++ {
-		for x := 0; x < 8; x++ {
+	for y := range 8 {
+		for x := range 8 {
 			zHD := 2*y - x
 			if zHD >= 0 && zHD%2 == 0 {
 				i := y - (x >> 1)
@@ -465,8 +465,8 @@ func predict8x8HorizontalDown(pred *[8][8]uint8, l [8]int, tl int, t [16]int) {
 }
 
 func predict8x8HorizontalUp(pred *[8][8]uint8, l [8]int) {
-	for y := 0; y < 8; y++ {
-		for x := 0; x < 8; x++ {
+	for y := range 8 {
+		for x := range 8 {
 			zHU := x + 2*y
 			if zHU < 13 {
 				i := y + (x >> 1)
@@ -498,16 +498,16 @@ func PredictChroma(mode int, top, left []uint8, topLeft uint8, blockSize int) [8
 		}
 	case IntraChromaHorizontal:
 		if left != nil {
-			for y := 0; y < blockSize; y++ {
-				for x := 0; x < blockSize; x++ {
+			for y := range blockSize {
+				for x := range blockSize {
 					pred[y][x] = left[y]
 				}
 			}
 		}
 	case IntraChromaVertical:
 		if top != nil {
-			for y := 0; y < blockSize; y++ {
-				for x := 0; x < blockSize; x++ {
+			for y := range blockSize {
+				for x := range blockSize {
 					pred[y][x] = top[x]
 				}
 			}
@@ -519,7 +519,7 @@ func PredictChroma(mode int, top, left []uint8, topLeft uint8, blockSize int) [8
 
 			iH := 0
 			iV := 0
-			for x := 0; x < xCF; x++ {
+			for x := range xCF {
 				topRight := int(top[xCF+x])
 				var topLeftRef int
 				if xCF-2-x >= 0 {
@@ -529,7 +529,7 @@ func PredictChroma(mode int, top, left []uint8, topLeft uint8, blockSize int) [8
 				}
 				iH += (x + 1) * (topRight - topLeftRef)
 			}
-			for y := 0; y < yCF; y++ {
+			for y := range yCF {
 				bottomRef := int(left[yCF+y])
 				var topLeftRef int
 				if yCF-2-y >= 0 {
@@ -544,8 +544,8 @@ func PredictChroma(mode int, top, left []uint8, topLeft uint8, blockSize int) [8
 			b := (34*iH + 32) >> 6
 			c := (34*iV + 32) >> 6
 
-			for y := 0; y < blockSize; y++ {
-				for x := 0; x < blockSize; x++ {
+			for y := range blockSize {
+				for x := range blockSize {
 					val := (a + b*(x-3) + c*(y-3) + 16) >> 5
 					pred[y][x] = clip8(val)
 				}
@@ -567,7 +567,7 @@ func predictChromaDC8x8(pred *[8][8]uint8, top, left []uint8) {
 	hasLeft := left != nil
 
 	// Four 4x4 sub-blocks: TL(0), TR(1), BL(2), BR(3)
-	for blk := 0; blk < 4; blk++ {
+	for blk := range 4 {
 		x0 := (blk % 2) * 4
 		y0 := (blk / 2) * 4
 

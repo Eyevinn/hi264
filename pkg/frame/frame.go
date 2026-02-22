@@ -73,8 +73,8 @@ func (f *Frame) GetChromaPixel(comp int, x, y int) uint8 {
 func (f *Frame) SetLuma16x16(mbX, mbY int, block [16][16]uint8) {
 	x0 := mbX * 16
 	y0 := mbY * 16
-	for y := 0; y < 16; y++ {
-		for x := 0; x < 16; x++ {
+	for y := range 16 {
+		for x := range 16 {
 			f.Y[(y0+y)*f.StrideY+x0+x] = block[y][x]
 		}
 	}
@@ -88,8 +88,8 @@ func (f *Frame) SetChroma8x8(comp int, mbX, mbY int, block [8][8]uint8) {
 	if comp == 1 {
 		plane = f.Cr
 	}
-	for y := 0; y < 8; y++ {
-		for x := 0; x < 8; x++ {
+	for y := range 8 {
+		for x := range 8 {
 			plane[(y0+y)*f.StrideC+x0+x] = block[y][x]
 		}
 	}
@@ -110,13 +110,13 @@ func (f *Frame) YUV420Bytes() []byte {
 	chromaW := f.Width / 2
 	chromaH := f.Height / 2
 	offset := lumaSize
-	for y := 0; y < chromaH; y++ {
+	for y := range chromaH {
 		copy(result[offset+y*chromaW:], f.Cb[y*f.StrideC:y*f.StrideC+chromaW])
 	}
 
 	// Copy Cr
 	offset = lumaSize + chromaSize
-	for y := 0; y < chromaH; y++ {
+	for y := range chromaH {
 		copy(result[offset+y*chromaW:], f.Cr[y*f.StrideC:y*f.StrideC+chromaW])
 	}
 

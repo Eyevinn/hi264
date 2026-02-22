@@ -135,7 +135,7 @@ func DecodeCBP(sc *SliceContext, mbIdx int) (cbpLuma, cbpChroma int) {
 
 	// Luma CBP: 4 bins for 4 8x8 blocks
 	// Each bin uses ctx 73+ctxIdxInc where ctxIdxInc depends on neighbor cbp
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		// Get neighbor CBP bits for context derivation
 		// Bit ordering: 0=top-left, 1=top-right, 2=bottom-left, 3=bottom-right
 		ctxIdxInc := deriveCBPLumaCtx(sc, mbIdx, i, cbpLuma)

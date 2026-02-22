@@ -132,7 +132,7 @@ func applyScalingList4x4(dst *[16]int32, lists []avc.ScalingList, idx int) bool 
 		return false
 	}
 	sl := lists[idx]
-	for k := 0; k < 16; k++ {
+	for k := range 16 {
 		dst[zigzag4x4[k]] = int32(sl[k])
 	}
 	return true
@@ -145,7 +145,7 @@ func applyScalingList8x8(dst *[64]int32, lists []avc.ScalingList, idx int) bool 
 		return false
 	}
 	sl := lists[idx]
-	for k := 0; k < 64; k++ {
+	for k := range 64 {
 		dst[zigzag8x8[k]] = int32(sl[k])
 	}
 	return true
@@ -154,7 +154,7 @@ func applyScalingList8x8(dst *[64]int32, lists []avc.ScalingList, idx int) bool 
 // applyDefault4x4Intra sets dst to the Default_4x4_Intra scaling list (Table 7-3),
 // converted from zigzag to raster order.
 func applyDefault4x4Intra(dst *[16]int32) {
-	for k := 0; k < 16; k++ {
+	for k := range 16 {
 		dst[zigzag4x4[k]] = int32(defaultScalingList4x4Intra[k])
 	}
 }
@@ -162,7 +162,7 @@ func applyDefault4x4Intra(dst *[16]int32) {
 // applyDefault8x8Intra sets dst to the Default_8x8_Intra scaling list (Table 7-4).
 // The 8x8 default is already in raster order (unlike the 4x4 default which is in zigzag).
 func applyDefault8x8Intra(dst *[64]int32) {
-	for k := 0; k < 64; k++ {
+	for k := range 64 {
 		dst[k] = int32(defaultScalingList8x8Intra[k])
 	}
 }
@@ -588,21 +588,21 @@ func reconstructI16x16(sc *slice.SliceContext, f *frame.Frame,
 	// 2. Inverse transform DC coefficients
 	// DC coefficients from CABAC are in zigzag scan order; Hadamard expects raster (row-major)
 	var dcMatrix [16]int32
-	for k := 0; k < 16; k++ {
+	for k := range 16 {
 		dcMatrix[zigzag4x4[k]] = mb.Intra16x16DCLevel[k]
 	}
 	dcTransformed := transform.InverseHadamard4x4(dcMatrix)
 	dcScaledRaster := transform.DequantDC4x4(dcTransformed, mb.QPY, sm.IntraY4x4[0])
 	// Remap scaled DC from raster to z-scan order for block assignment
 	var dcScaled [16]int32
-	for i := 0; i < 16; i++ {
+	for i := range 16 {
 		dcScaled[i] = dcScaledRaster[zScanToRaster[i]]
 	}
 
 	// 3. For each 4x4 block, apply inverse transform and add prediction
 	sl := &sm.IntraY4x4
 	var lumaBlock [16][16]uint8
-	for i := 0; i < 16; i++ {
+	for i := range 16 {
 		// Map 4x4 block index to position
 		bx := inverseRasterX4x4[i]
 		by := inverseRasterY4x4[i]
@@ -611,7 +611,7 @@ func reconstructI16x16(sc *slice.SliceContext, f *frame.Frame,
 		// AC coefficients need zigzag scan conversion from CABAC order to matrix order
 		var block4x4 [16]int32
 		block4x4[0] = dcScaled[i]
-		for j := 0; j < 15; j++ {
+		for j := range 15 {
 			block4x4[zigzag4x4AC[j]] = mb.Intra16x16ACLevel[i][j]
 		}
 
@@ -624,8 +624,8 @@ func reconstructI16x16(sc *slice.SliceContext, f *frame.Frame,
 		residual := transform.InverseTransform4x4(dequantBlock)
 
 		// Add prediction + residual, clip to [0,255]
-		for y := 0; y < 4; y++ {
-			for x := 0; x < 4; x++ {
+		for y := range 4 {
+			for x := range 4 {
 				val := int32(predBlock[by+y][bx+x]) + residual[y*4+x]
 				lumaBlock[by+y][bx+x] = clip8(val)
 			}
@@ -643,7 +643,7 @@ func reconstructI4x4(sc *slice.SliceContext, f *frame.Frame,
 	y0 := mbY * 16
 	sl := &sm.IntraY4x4
 
-	for i := 0; i < 16; i++ {
+	for i := range 16 {
 		bx := inverseRasterX4x4[i]
 		by := inverseRasterY4x4[i]
 
@@ -657,7 +657,7 @@ func reconstructI4x4(sc *slice.SliceContext, f *frame.Frame,
 
 		// Apply zigzag scan to convert from CABAC scan order to matrix order
 		var coeffs [16]int32
-		for j := 0; j < 16; j++ {
+		for j := range 16 {
 			coeffs[zigzag4x4[j]] = mb.LumaLevel4x4[i][j]
 		}
 		// Dequantize + inverse transform
@@ -665,8 +665,8 @@ func reconstructI4x4(sc *slice.SliceContext, f *frame.Frame,
 		residual := transform.InverseTransform4x4(dequant)
 
 		// Reconstruct
-		for y := 0; y < 4; y++ {
-			for x := 0; x < 4; x++ {
+		for y := range 4 {
+			for x := range 4 {
 				val := int32(predBlock[y][x]) + residual[y*4+x]
 				f.SetLumaPixel(x0+bx+x, y0+by+y, clip8(val))
 			}
@@ -685,7 +685,7 @@ func reconstructI8x8(sc *slice.SliceContext, f *frame.Frame,
 	frameH := sc.MBHeight * 16
 	sl := &sm.IntraY8x8
 
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		bx := (i % 2) * 8
 		by := (i / 2) * 8
 
@@ -704,7 +704,7 @@ func reconstructI8x8(sc *slice.SliceContext, f *frame.Frame,
 			coeffs = mb.LumaLevel8x8[i]
 		} else {
 			// CABAC: convert from zigzag scan order to raster
-			for j := 0; j < 64; j++ {
+			for j := range 64 {
 				coeffs[zigzag8x8[j]] = mb.LumaLevel8x8[i][j]
 			}
 		}
@@ -716,8 +716,8 @@ func reconstructI8x8(sc *slice.SliceContext, f *frame.Frame,
 		residual := transform.InverseTransform8x8(dequant)
 
 		// 6. Reconstruct: prediction + residual, clip to [0,255]
-		for y := 0; y < 8; y++ {
-			for x := 0; x < 8; x++ {
+		for y := range 8 {
+			for x := range 8 {
 				val := int32(predBlock[y][x]) + residual[y*8+x]
 				f.SetLumaPixel(x0+bx+x, y0+by+y, clip8(val))
 			}
@@ -736,7 +736,7 @@ func getLuma8x8Neighbors(f *frame.Frame, blkX, blkY int, i8x8 int, frameW, frame
 	var avail [25]bool
 
 	// Left: ref[0]=L7(bottom)..ref[7]=L0(top) = p[-1,7]..p[-1,0]
-	for i := 0; i < 8; i++ {
+	for i := range 8 {
 		px, py := blkX-1, blkY+7-i
 		if px >= 0 && py >= 0 && py < frameH {
 			ref[i] = f.GetLumaPixel(px, py)
@@ -751,7 +751,7 @@ func getLuma8x8Neighbors(f *frame.Frame, blkX, blkY int, i8x8 int, frameW, frame
 	}
 
 	// Top: ref[9]=T0..ref[16]=T7 = p[0,-1]..p[7,-1]
-	for i := 0; i < 8; i++ {
+	for i := range 8 {
 		px, py := blkX+i, blkY-1
 		if py >= 0 && px >= 0 && px < frameW {
 			ref[9+i] = f.GetLumaPixel(px, py)
@@ -762,7 +762,7 @@ func getLuma8x8Neighbors(f *frame.Frame, blkX, blkY int, i8x8 int, frameW, frame
 	// Top-right: ref[17]=T8..ref[24]=T15 = p[8,-1]..p[15,-1]
 	// Not available for 8x8 block index 3 (bottom-right in MB)
 	topRightOK := i8x8 != 3
-	for i := 0; i < 8; i++ {
+	for i := range 8 {
 		px, py := blkX+8+i, blkY-1
 		if topRightOK && py >= 0 && px >= 0 && px < frameW {
 			ref[17+i] = f.GetLumaPixel(px, py)
@@ -773,7 +773,7 @@ func getLuma8x8Neighbors(f *frame.Frame, blkX, blkY int, i8x8 int, frameW, frame
 	// Substitution (section 8.3.2.2.2)
 	// Scan order: ref[0] (bottom-left) to ref[24] (top-right)
 	firstAvailIdx := -1
-	for i := 0; i < 25; i++ {
+	for i := range 25 {
 		if avail[i] {
 			firstAvailIdx = i
 			break
@@ -820,7 +820,7 @@ func reconstructChroma(sc *slice.SliceContext, f *frame.Frame,
 	mbIdx, mbX, mbY int, mb *slice.MBData, sm *ScalingMatrices) {
 	chromaSL := [2]*[16]int32{&sm.IntraCb4x4, &sm.IntraCr4x4}
 
-	for iCbCr := 0; iCbCr < 2; iCbCr++ {
+	for iCbCr := range 2 {
 		sl := chromaSL[iCbCr]
 
 		// Get chroma prediction
@@ -845,7 +845,7 @@ func reconstructChroma(sc *slice.SliceContext, f *frame.Frame,
 
 		// For each 4x4 chroma block
 		var chromaBlock [8][8]uint8
-		for blk := 0; blk < 4; blk++ {
+		for blk := range 4 {
 			bx := (blk % 2) * 4
 			by := (blk / 2) * 4
 
@@ -853,7 +853,7 @@ func reconstructChroma(sc *slice.SliceContext, f *frame.Frame,
 			block4x4[0] = dcScaled[blk]
 			if mb.CBPChroma > 1 {
 				// Apply zigzag scan conversion for AC coefficients
-				for j := 0; j < 15; j++ {
+				for j := range 15 {
 					block4x4[zigzag4x4AC[j]] = mb.ChromaACLevel[iCbCr][blk][j]
 				}
 			}
@@ -862,8 +862,8 @@ func reconstructChroma(sc *slice.SliceContext, f *frame.Frame,
 			dequant[0] = dcScaled[blk]
 			residual := transform.InverseTransform4x4(dequant)
 
-			for y := 0; y < 4; y++ {
-				for x := 0; x < 4; x++ {
+			for y := range 4 {
+				for x := range 4 {
 					val := int32(predBlock[by+y][bx+x]) + residual[y*4+x]
 					chromaBlock[by+y][bx+x] = clip8(val)
 				}
@@ -882,14 +882,14 @@ func getLuma16x16Neighbors(f *frame.Frame, mbX, mbY int) (
 
 	if mbY > 0 {
 		hasTop = true
-		for x := 0; x < 16; x++ {
+		for x := range 16 {
 			top[x] = f.GetLumaPixel(x0+x, y0-1)
 		}
 	}
 
 	if mbX > 0 {
 		hasLeft = true
-		for y := 0; y < 16; y++ {
+		for y := range 16 {
 			left[y] = f.GetLumaPixel(x0-1, y0+y)
 		}
 	}
@@ -920,7 +920,7 @@ func getLuma4x4Neighbors(f *frame.Frame, x0, y0 int, blkIdx int, mbX, mbY int, m
 	// ref[4]    = TL (top-left)
 	// ref[5..12]= T0..T7 (top row + upper-right)
 
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		if x0 > 0 && y0+3-i >= 0 && y0+3-i < frameH {
 			ref[i] = f.GetLumaPixel(x0-1, y0+3-i)
 		} else {
@@ -935,7 +935,7 @@ func getLuma4x4Neighbors(f *frame.Frame, x0, y0 int, blkIdx int, mbX, mbY int, m
 	}
 
 	// Top samples T0..T3
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		if y0 > 0 && x0+i >= 0 && x0+i < frameW {
 			ref[5+i] = f.GetLumaPixel(x0+i, y0-1)
 		} else {
@@ -981,14 +981,14 @@ func getChromaNeighbors(f *frame.Frame, comp int, mbX, mbY int) (
 
 	if mbY > 0 {
 		hasTop = true
-		for x := 0; x < 8; x++ {
+		for x := range 8 {
 			top[x] = f.GetChromaPixel(comp, x0+x, y0-1)
 		}
 	}
 
 	if mbX > 0 {
 		hasLeft = true
-		for y := 0; y < 8; y++ {
+		for y := range 8 {
 			left[y] = f.GetChromaPixel(comp, x0-1, y0+y)
 		}
 	}

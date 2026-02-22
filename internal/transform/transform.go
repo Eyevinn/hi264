@@ -12,7 +12,7 @@ func InverseTransform4x4(coeffs [16]int32) [16]int32 {
 	block[0] += 32
 
 	// 1D transform on rows: for each row i, process columns 0-3
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		z0 := block[i*4+0] + block[i*4+2]
 		z1 := block[i*4+0] - block[i*4+2]
 		z2 := (block[i*4+1] >> 1) - block[i*4+3]
@@ -26,7 +26,7 @@ func InverseTransform4x4(coeffs [16]int32) [16]int32 {
 
 	// 1D transform on columns
 	var result [16]int32
-	for j := 0; j < 4; j++ {
+	for j := range 4 {
 		z0 := block[0*4+j] + block[2*4+j]
 		z1 := block[0*4+j] - block[2*4+j]
 		z2 := (block[1*4+j] >> 1) - block[3*4+j]
@@ -47,7 +47,7 @@ func InverseHadamard4x4(coeffs [16]int32) [16]int32 {
 	var temp [16]int32
 
 	// 1D Hadamard on rows
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		s0 := coeffs[i*4+0]
 		s1 := coeffs[i*4+1]
 		s2 := coeffs[i*4+2]
@@ -61,7 +61,7 @@ func InverseHadamard4x4(coeffs [16]int32) [16]int32 {
 
 	// 1D Hadamard on columns
 	var result [16]int32
-	for j := 0; j < 4; j++ {
+	for j := range 4 {
 		f0 := temp[0*4+j]
 		f1 := temp[1*4+j]
 		f2 := temp[2*4+j]
@@ -94,7 +94,7 @@ func InverseTransform8x8(coeffs [64]int32) [64]int32 {
 	var temp [64]int32
 
 	// 1D transform on rows
-	for i := 0; i < 8; i++ {
+	for i := range 8 {
 		a0 := coeffs[i*8+0]
 		a1 := coeffs[i*8+1]
 		a2 := coeffs[i*8+2]
@@ -135,7 +135,7 @@ func InverseTransform8x8(coeffs [64]int32) [64]int32 {
 
 	// 1D transform on columns
 	var result [64]int32
-	for j := 0; j < 8; j++ {
+	for j := range 8 {
 		a0 := temp[0*8+j]
 		a1 := temp[1*8+j]
 		a2 := temp[2*8+j]

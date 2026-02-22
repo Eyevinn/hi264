@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- Minimal Go version 1.24
+- Ran go fix to modernize the code
+
 ## [0.9.0] - 2026-02-17
 
 ### Added
@@ -110,3 +116,7 @@ Typical use cases include:
 #### Verification
 - 41+ golden decoder test cases with pixel-perfect FFmpeg match
 - 12+ encoder verification tests against FFmpeg decode
+
+[Unreleased]: https://github.com/Eyevinn/hi264/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/Eyevinn/hi264/compare/v0.8.0...v0.9.0
+[0.8.0]: https://github.com/Eyevinn/hi264/releases/tag/v0.8.0

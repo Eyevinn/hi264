@@ -99,9 +99,9 @@ func TestEncodePSkipSliceRoundTrip(t *testing.T) {
 
 	chromaW := idrFrame.Width / 2
 	chromaH := idrFrame.Height / 2
-	for y := 0; y < chromaH; y++ {
-		for x := 0; x < chromaW; x++ {
-			for c := 0; c < 2; c++ {
+	for y := range chromaH {
+		for x := range chromaW {
+			for c := range 2 {
 				got := pSkipFrame.GetChromaPixel(c, x, y)
 				want := idrFrame.GetChromaPixel(c, x, y)
 				if got != want {
@@ -347,9 +347,9 @@ func TestEncodePSkipSliceCABACRoundTrip(t *testing.T) {
 
 	chromaW := idrFrame.Width / 2
 	chromaH := idrFrame.Height / 2
-	for y := 0; y < chromaH; y++ {
-		for x := 0; x < chromaW; x++ {
-			for c := 0; c < 2; c++ {
+	for y := range chromaH {
+		for x := range chromaW {
+			for c := range 2 {
 				got := pSkipFrame.GetChromaPixel(c, x, y)
 				want := idrFrame.GetChromaPixel(c, x, y)
 				if got != want {

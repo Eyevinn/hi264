@@ -27,7 +27,7 @@ func TestForwardHadamard4x4RoundTrip(t *testing.T) {
 	// Inverse Hadamard of [800, 0, ...] = [800, 800, ...] (all equal)
 	inv := transform.InverseHadamard4x4(fwd)
 	expected := int32(800)
-	for i := 0; i < 16; i++ {
+	for i := range 16 {
 		if inv[i] != expected {
 			t.Errorf("inverse[%d]=%d, want %d", i, inv[i], expected)
 		}
@@ -48,7 +48,7 @@ func TestForwardHadamard2x2RoundTrip(t *testing.T) {
 	}
 
 	inv := transform.InverseHadamard2x2(fwd)
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		if inv[i] != 200 {
 			t.Errorf("inverse[%d]=%d, want 200", i, inv[i])
 		}

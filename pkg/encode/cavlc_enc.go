@@ -353,7 +353,7 @@ func writeLevelVLC(w *BitWriter, levelCode, suffixLength int) {
 		}
 	} else if levelPrefix == 14 {
 		// Write 14 zeros + 1
-		for i := 0; i < 14; i++ {
+		for range 14 {
 			w.WriteBit(0)
 		}
 		w.WriteBit(1)
@@ -368,7 +368,7 @@ func writeLevelVLC(w *BitWriter, levelCode, suffixLength int) {
 	} else {
 		// level_prefix >= 15: use escape coding
 		// prefix = 15 (15 zeros + 1), suffix = 12 bits
-		for i := 0; i < 15; i++ {
+		for range 15 {
 			w.WriteBit(0)
 		}
 		w.WriteBit(1)
@@ -401,10 +401,7 @@ func writeTotalZeros(w *BitWriter, totalZeros, totalCoeff, nC, maxNumCoeff int) 
 }
 
 func writeRunBefore(w *BitWriter, runBefore, zerosLeft int) {
-	idx := zerosLeft - 1
-	if idx > 6 {
-		idx = 6
-	}
+	idx := min(zerosLeft-1, 6)
 	bits := encRunBeforeBits[idx][runBefore]
 	length := encRunBeforeLen[idx][runBefore]
 	w.WriteBits(uint32(bits), int(length))
