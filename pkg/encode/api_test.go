@@ -208,8 +208,8 @@ func TestRoundTrip(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			for mbY := 0; mbY < 2; mbY++ {
-				for mbX := 0; mbX < 2; mbX++ {
+			for mbY := range 2 {
+				for mbX := range 2 {
 					cx := mbX*16 + 8
 					cy := mbY*16 + 8
 					gotY := f.GetLumaPixel(cx, cy)

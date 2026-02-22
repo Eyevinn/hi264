@@ -35,7 +35,7 @@ func InitModels(sliceQPY int, sliceType int, cabacInitIDC int) Models {
 
 	qp := clip3(0, 51, sliceQPY)
 
-	for i := 0; i < 1024; i++ {
+	for i := range 1024 {
 		m := int(tab[i][0])
 		n := int(tab[i][1])
 

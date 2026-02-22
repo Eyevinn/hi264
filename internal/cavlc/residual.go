@@ -18,10 +18,7 @@ func DecodeCoeffToken(br *BitReader, nC int) (totalCoeff, trailingOnes int, err 
 	}
 
 	for tc := 0; tc <= 16; tc++ {
-		maxT1 := tc
-		if maxT1 > 3 {
-			maxT1 = 3
-		}
+		maxT1 := min(tc, 3)
 		for t1 := 0; t1 <= maxT1; t1++ {
 			idx := 4*tc + t1
 			codeLen := int(coeffTokenLen[tableIdx][idx])
@@ -49,10 +46,7 @@ func decodeChromaDCCoeffToken(br *BitReader) (totalCoeff, trailingOnes int, err 
 	}
 
 	for tc := 0; tc <= 4; tc++ {
-		maxT1 := tc
-		if maxT1 > 3 {
-			maxT1 = 3
-		}
+		maxT1 := min(tc, 3)
 		for t1 := 0; t1 <= maxT1; t1++ {
 			idx := 4*tc + t1
 			codeLen := int(chromaDCCoeffTokenLen[idx])
@@ -174,10 +168,7 @@ func DecodeRunBefore(br *BitReader, zerosLeft int) (int, error) {
 		return 0, nil
 	}
 
-	tableRow := zerosLeft - 1
-	if tableRow > 6 {
-		tableRow = 6
-	}
+	tableRow := min(zerosLeft-1, 6)
 
 	// Find max code length
 	maxLen := 0
@@ -235,7 +226,7 @@ func DecodeResidualBlock(br *BitReader, nC int, maxNumCoeff int) ([]int32, int, 
 	levels := make([]int32, totalCoeff)
 
 	// 1. Trailing ones sign flags (in reverse order)
-	for i := 0; i < trailingOnes; i++ {
+	for i := range trailingOnes {
 		sign, err := br.ReadBit()
 		if err != nil {
 			return coeffs, 0, fmt.Errorf("trailing_ones_sign: %w", err)
@@ -273,10 +264,7 @@ func DecodeResidualBlock(br *BitReader, nC int, maxNumCoeff int) ([]int32, int, 
 				return coeffs, 0, fmt.Errorf("level_suffix[%d]: %w", i, err)
 			}
 			// Spec 9.2.2: use Min(15, levelPrefix) for the shift
-			clampedPrefix := levelPrefix
-			if clampedPrefix > 15 {
-				clampedPrefix = 15
-			}
+			clampedPrefix := min(levelPrefix, 15)
 			levelCode = (clampedPrefix << uint(suffixLength)) + int(levelSuffix)
 		} else {
 			levelCode = levelPrefix

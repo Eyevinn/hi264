@@ -143,8 +143,8 @@ func (e *FrameEncoder) encodeSliceCAVLC(idrPicID uint32) ([]byte, error) {
 	reconCb := make([]uint8, (height/2)*strideC)
 	reconCr := make([]uint8, (height/2)*strideC)
 
-	for mbY := 0; mbY < mbHeight; mbY++ {
-		for mbX := 0; mbX < mbWidth; mbX++ {
+	for mbY := range mbHeight {
+		for mbX := range mbWidth {
 			ch := e.Grid.Chars[mbY][mbX]
 			c, ok := e.Colors[ch]
 			if !ok {
@@ -209,8 +209,8 @@ func (e *FrameEncoder) encodeSliceCABAC(idrPicID uint32) ([]byte, error) {
 	reconCb := make([]uint8, (height/2)*strideC)
 	reconCr := make([]uint8, (height/2)*strideC)
 
-	for mbY := 0; mbY < mbHeight; mbY++ {
-		for mbX := 0; mbX < mbWidth; mbX++ {
+	for mbY := range mbHeight {
+		for mbX := range mbWidth {
 			ch := e.Grid.Chars[mbY][mbX]
 			c, ok := e.Colors[ch]
 			if !ok {
@@ -278,7 +278,7 @@ func (e *FrameEncoder) encodeMBCABAC(enc *cabac.Encoder, ctx []cabac.CtxState,
 
 	var cbDCMatrix [4]int32
 	var crDCMatrix [4]int32
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		cbDCMatrix[i] = ForwardTransformDC4x4(int32(c.Cb) - int32(cbPreds[i]))
 		crDCMatrix[i] = ForwardTransformDC4x4(int32(c.Cr) - int32(crPreds[i]))
 	}
@@ -288,7 +288,7 @@ func (e *FrameEncoder) encodeMBCABAC(enc *cabac.Encoder, ctx []cabac.CtxState,
 	quantCrDC := QuantizeChromaDC2x2(crHadamard, qpc)
 
 	hasChromaDC := false
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		if quantCbDC[i] != 0 || quantCrDC[i] != 0 {
 			hasChromaDC = true
 			break
@@ -362,21 +362,21 @@ func (e *FrameEncoder) encodeMBCABAC(enc *cabac.Encoder, ctx []cabac.CtxState,
 
 	// Update reconstructed pixels
 	reconLumaVal := reconstructLumaValue(quantDC, lumaPred, qp)
-	for y := 0; y < 16; y++ {
+	for y := range 16 {
 		off := (mbY*16+y)*strideY + mbX*16
-		for x := 0; x < 16; x++ {
+		for x := range 16 {
 			reconY[off+x] = reconLumaVal
 		}
 	}
 	reconCbVals := reconstructChromaValues4x4(quantCbDC, cbPreds, qpc)
 	reconCrVals := reconstructChromaValues4x4(quantCrDC, crPreds, qpc)
-	for blk := 0; blk < 4; blk++ {
+	for blk := range 4 {
 		x0 := (blk % 2) * 4
 		y0 := (blk / 2) * 4
-		for y := 0; y < 4; y++ {
+		for y := range 4 {
 			offCb := (mbY*8+y0+y)*strideC + mbX*8 + x0
 			offCr := offCb
-			for x := 0; x < 4; x++ {
+			for x := range 4 {
 				reconCb[offCb+x] = reconCbVals[blk]
 				reconCr[offCr+x] = reconCrVals[blk]
 			}
@@ -450,7 +450,7 @@ func (e *FrameEncoder) encodeMB(w *BitWriter, mbX, mbY int, c yuv.Color,
 	// Chroma DC: each 4x4 sub-block has its own residual
 	var cbDCMatrix [4]int32
 	var crDCMatrix [4]int32
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		cbDCMatrix[i] = ForwardTransformDC4x4(int32(c.Cb) - int32(cbPreds[i]))
 		crDCMatrix[i] = ForwardTransformDC4x4(int32(c.Cr) - int32(crPreds[i]))
 	}
@@ -462,7 +462,7 @@ func (e *FrameEncoder) encodeMB(w *BitWriter, mbX, mbY int, c yuv.Color,
 
 	// Check if any chroma DC is non-zero
 	hasChromaDC := false
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		if quantCbDC[i] != 0 || quantCrDC[i] != 0 {
 			hasChromaDC = true
 			break
@@ -495,7 +495,7 @@ func (e *FrameEncoder) encodeMB(w *BitWriter, mbX, mbY int, c yuv.Color,
 	// For flat blocks, all AC coefficients are zero.
 	// If lumaCBP == 0, we don't write AC blocks.
 	// Even when lumaCBP == 0, we still need to update nC for neighbor tracking.
-	for blk := 0; blk < 16; blk++ {
+	for blk := range 16 {
 		bx := inverseRasterX4x4[blk]
 		by := inverseRasterY4x4[blk]
 		nCLuma[mbY*4+by/4][mbX*4+bx/4] = 0
@@ -512,7 +512,7 @@ func (e *FrameEncoder) encodeMB(w *BitWriter, mbX, mbY int, c yuv.Color,
 	}
 
 	// Update chroma nC (all zero for flat blocks)
-	for blk := 0; blk < 4; blk++ {
+	for blk := range 4 {
 		bx := (blk % 2)
 		by := (blk / 2)
 		nCCb[mbY*2+by][mbX*2+bx] = 0
@@ -522,22 +522,22 @@ func (e *FrameEncoder) encodeMB(w *BitWriter, mbX, mbY int, c yuv.Color,
 	// Update reconstructed pixels
 	// Need to do inverse quant + inverse transform to get actual reconstructed values
 	reconLumaVal := reconstructLumaValue(quantDC, lumaPred, qp)
-	for y := 0; y < 16; y++ {
+	for y := range 16 {
 		off := (mbY*16+y)*strideY + mbX*16
-		for x := 0; x < 16; x++ {
+		for x := range 16 {
 			reconY[off+x] = reconLumaVal
 		}
 	}
 
 	reconCbVals := reconstructChromaValues4x4(quantCbDC, cbPreds, qpc)
 	reconCrVals := reconstructChromaValues4x4(quantCrDC, crPreds, qpc)
-	for blk := 0; blk < 4; blk++ {
+	for blk := range 4 {
 		x0 := (blk % 2) * 4
 		y0 := (blk / 2) * 4
-		for y := 0; y < 4; y++ {
+		for y := range 4 {
 			offCb := (mbY*8+y0+y)*strideC + mbX*8 + x0
 			offCr := offCb
-			for x := 0; x < 4; x++ {
+			for x := range 4 {
 				reconCb[offCb+x] = reconCbVals[blk]
 				reconCr[offCr+x] = reconCrVals[blk]
 			}
@@ -560,7 +560,7 @@ func computeLumaDCPred(reconY []uint8, strideY, mbX, mbY int) uint8 {
 
 	if hasTop {
 		off := (mbY*16-1)*strideY + mbX*16
-		for x := 0; x < 16; x++ {
+		for x := range 16 {
 			sum += int(reconY[off+x])
 		}
 		count += 16
@@ -568,7 +568,7 @@ func computeLumaDCPred(reconY []uint8, strideY, mbX, mbY int) uint8 {
 
 	if hasLeft {
 		off := mbY*16*strideY + mbX*16 - 1
-		for y := 0; y < 16; y++ {
+		for y := range 16 {
 			sum += int(reconY[off+y*strideY])
 		}
 		count += 16
@@ -666,7 +666,7 @@ func selectChromaMode(reconCb, reconCr []uint8, strideC, mbX, mbY int,
 // chromaPredError computes total absolute error across all 4 sub-blocks for both Cb and Cr.
 func chromaPredError(targetCb, targetCr uint8, cbPreds, crPreds [4]uint8) int {
 	total := 0
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		total += absInt(int(targetCb)-int(cbPreds[i])) + absInt(int(targetCr)-int(crPreds[i]))
 	}
 	return total
@@ -690,19 +690,19 @@ func computeChromaDCPreds4x4(recon []uint8, strideC, mbX, mbY int) [4]uint8 {
 	var left [8]int
 	if hasTop {
 		off := (mbY*8-1)*strideC + mbX*8
-		for x := 0; x < 8; x++ {
+		for x := range 8 {
 			top[x] = int(recon[off+x])
 		}
 	}
 	if hasLeft {
 		off := mbY*8*strideC + mbX*8 - 1
-		for y := 0; y < 8; y++ {
+		for y := range 8 {
 			left[y] = int(recon[off+y*strideC])
 		}
 	}
 
 	var preds [4]uint8
-	for blk := 0; blk < 4; blk++ {
+	for blk := range 4 {
 		x0 := (blk % 2) * 4
 		y0 := (blk / 2) * 4
 
@@ -808,7 +808,7 @@ func reconstructChromaValues4x4(quantDC [4]int32, preds [4]uint8, qpc int) [4]ui
 	dcScaled := dequantChromaDC2x2(invHadamard, qpc, 16)
 
 	var result [4]uint8
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		residual := (dcScaled[i] + 32) >> 6
 		val := int32(preds[i]) + residual
 		result[i] = clipU8(int(val))
@@ -833,11 +833,11 @@ func dequantDC4x4(coeffs [16]int32, qp int, weightScaleDC int32) [16]int32 {
 	qpRem := qp % 6
 	levelScale := levelScale4x4[qpRem][0] * weightScaleDC
 	if qpPer >= 6 {
-		for i := 0; i < 16; i++ {
+		for i := range 16 {
 			result[i] = coeffs[i] * levelScale << uint(qpPer-6)
 		}
 	} else {
-		for i := 0; i < 16; i++ {
+		for i := range 16 {
 			result[i] = (coeffs[i]*levelScale + (1 << uint(5-qpPer))) >> uint(6-qpPer)
 		}
 	}
@@ -850,11 +850,11 @@ func dequantChromaDC2x2(coeffs [4]int32, qpc int, weightScaleDC int32) [4]int32 
 	qpRem := qpc % 6
 	levelScale := levelScale4x4[qpRem][0] * weightScaleDC
 	if qpPer >= 5 {
-		for i := 0; i < 4; i++ {
+		for i := range 4 {
 			result[i] = coeffs[i] * levelScale << uint(qpPer-5)
 		}
 	} else {
-		for i := 0; i < 4; i++ {
+		for i := range 4 {
 			result[i] = (coeffs[i] * levelScale) >> uint(5-qpPer)
 		}
 	}
@@ -863,7 +863,7 @@ func dequantChromaDC2x2(coeffs [4]int32, qpc int, weightScaleDC int32) [4]int32 
 
 func inverseHadamard4x4(coeffs [16]int32) [16]int32 {
 	var temp [16]int32
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		s0, s1, s2, s3 := coeffs[i*4], coeffs[i*4+1], coeffs[i*4+2], coeffs[i*4+3]
 		temp[i*4+0] = s0 + s1 + s2 + s3
 		temp[i*4+1] = s0 + s1 - s2 - s3
@@ -871,7 +871,7 @@ func inverseHadamard4x4(coeffs [16]int32) [16]int32 {
 		temp[i*4+3] = s0 - s1 + s2 - s3
 	}
 	var result [16]int32
-	for j := 0; j < 4; j++ {
+	for j := range 4 {
 		f0, f1, f2, f3 := temp[j], temp[4+j], temp[8+j], temp[12+j]
 		result[j] = f0 + f1 + f2 + f3
 		result[4+j] = f0 + f1 - f2 - f3

@@ -75,7 +75,7 @@ func Dequant4x4(coeffs [16]int32, qp int, scalingList *[16]int32) [16]int32 {
 		sl = scalingList
 	}
 
-	for i := 0; i < 16; i++ {
+	for i := range 16 {
 		if coeffs[i] == 0 {
 			continue
 		}
@@ -120,7 +120,7 @@ func Dequant8x8(coeffs [64]int32, qp int, scalingList *[64]int32) [64]int32 {
 		sl = scalingList
 	}
 
-	for i := 0; i < 64; i++ {
+	for i := range 64 {
 		if coeffs[i] == 0 {
 			continue
 		}
@@ -168,11 +168,11 @@ func DequantDC4x4(coeffs [16]int32, qp int, weightScaleDC int32) [16]int32 {
 	levelScale := LevelScale4x4[qpRem][0] * weightScaleDC
 
 	if qpPer >= 6 {
-		for i := 0; i < 16; i++ {
+		for i := range 16 {
 			result[i] = coeffs[i] * levelScale << uint(qpPer-6)
 		}
 	} else {
-		for i := 0; i < 16; i++ {
+		for i := range 16 {
 			result[i] = (coeffs[i]*levelScale + (1 << uint(5-qpPer))) >> uint(6-qpPer)
 		}
 	}
@@ -190,12 +190,12 @@ func DequantChromaDC2x2(coeffs [4]int32, qpc int, weightScaleDC int32) [4]int32 
 	levelScale := LevelScale4x4[qpRem][0] * weightScaleDC
 
 	if qpPer >= 5 {
-		for i := 0; i < 4; i++ {
+		for i := range 4 {
 			result[i] = coeffs[i] * levelScale << uint(qpPer-5)
 		}
 	} else {
 		// No rounding bias — matches FFmpeg's (c * qmul) >> 7 truncation.
-		for i := 0; i < 4; i++ {
+		for i := range 4 {
 			result[i] = (coeffs[i] * levelScale) >> uint(5-qpPer)
 		}
 	}

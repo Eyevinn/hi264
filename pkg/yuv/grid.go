@@ -166,8 +166,8 @@ func BuildFrame(grid *Grid, colors ColorMap) (*frame.Frame, error) {
 
 			// Fill luma 16x16
 			var lumaBlock [16][16]uint8
-			for y := 0; y < 16; y++ {
-				for x := 0; x < 16; x++ {
+			for y := range 16 {
+				for x := range 16 {
 					lumaBlock[y][x] = c.Y
 				}
 			}
@@ -175,8 +175,8 @@ func BuildFrame(grid *Grid, colors ColorMap) (*frame.Frame, error) {
 
 			// Fill chroma 8x8
 			var cbBlock, crBlock [8][8]uint8
-			for y := 0; y < 8; y++ {
-				for x := 0; x < 8; x++ {
+			for y := range 8 {
+				for x := range 8 {
 					cbBlock[y][x] = c.Cb
 					crBlock[y][x] = c.Cr
 				}

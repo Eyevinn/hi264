@@ -48,7 +48,7 @@ func DecodeSliceData(sliceData []byte, sliceQPY int, mbWidth, mbHeight int,
 	}
 
 	// Decode each macroblock
-	for mbIdx := 0; mbIdx < totalMBs; mbIdx++ {
+	for mbIdx := range totalMBs {
 		err := decodeMacroblock(sc, mbIdx)
 		if err != nil {
 			return sc, fmt.Errorf("mb %d: %w", mbIdx, err)
@@ -85,7 +85,7 @@ func decodeMacroblock(sc *SliceContext, mbIdx int) error {
 
 		if mb.TransformSize8x8 {
 			// I_8x8: decode 4 8x8 prediction modes
-			for i := 0; i < 4; i++ {
+			for i := range 4 {
 				prevFlag, rem := DecodeIntra8x8PredMode(sc)
 				predicted := derivePredIntra8x8PredMode(sc, mbIdx, i)
 				if prevFlag {
@@ -100,7 +100,7 @@ func decodeMacroblock(sc *SliceContext, mbIdx int) error {
 			}
 		} else {
 			// I_4x4: decode 16 4x4 prediction modes
-			for i := 0; i < 16; i++ {
+			for i := range 16 {
 				prevFlag, rem := DecodeIntra4x4PredMode(sc)
 				predicted := derivePredIntra4x4PredMode(sc, mbIdx, i)
 				if prevFlag {
@@ -179,18 +179,18 @@ func decodeResidualMB(sc *SliceContext, mbIdx int) {
 
 		// Intra16x16 DC level (16 coefficients)
 		dcCoeffs := DecodeResidual(sc, mbIdx, CtxBlockCatIntra16x16DC, 0, 16)
-		for i := 0; i < 16; i++ {
+		for i := range 16 {
 			mb.Intra16x16DCLevel[i] = dcCoeffs[i]
 		}
 
 		// Intra16x16 AC levels (15 coefficients per 4x4 block)
 		if mb.CBPLuma > 0 {
-			for i := 0; i < 16; i++ {
+			for i := range 16 {
 				// Check if the 8x8 block containing this 4x4 block has coded coeffs
 				i8x8 := i / 4
 				if mb.CBPLuma&(1<<uint(i8x8)) != 0 {
 					acCoeffs := DecodeResidual(sc, mbIdx, CtxBlockCatIntra16x16AC, i, 15)
-					for j := 0; j < 15; j++ {
+					for j := range 15 {
 						mb.Intra16x16ACLevel[i][j] = acCoeffs[j]
 					}
 				}
@@ -199,10 +199,10 @@ func decodeResidualMB(sc *SliceContext, mbIdx int) {
 	} else if mb.MBType == MBTypeINxN {
 		if mb.TransformSize8x8 {
 			// I_8x8: decode 8x8 luma blocks
-			for i := 0; i < 4; i++ {
+			for i := range 4 {
 				if mb.CBPLuma&(1<<uint(i)) != 0 {
 					coeffs := DecodeResidual(sc, mbIdx, CtxBlockCatLuma8x8, i, 64)
-					for j := 0; j < 64; j++ {
+					for j := range 64 {
 						mb.LumaLevel8x8[i][j] = coeffs[j]
 					}
 					// Mark 8x8 block as coded for neighbor CBF context derivation.
@@ -214,11 +214,11 @@ func decodeResidualMB(sc *SliceContext, mbIdx int) {
 		} else {
 			// I_4x4: decode 16 4x4 luma blocks
 			// Block indices use H.264 hierarchical scan: i/4 gives 8x8 block index
-			for i := 0; i < 16; i++ {
+			for i := range 16 {
 				i8x8 := i / 4
 				if mb.CBPLuma&(1<<uint(i8x8)) != 0 {
 					coeffs := DecodeResidual(sc, mbIdx, CtxBlockCatLuma4x4, i, 16)
-					for j := 0; j < 16; j++ {
+					for j := range 16 {
 						mb.LumaLevel4x4[i][j] = coeffs[j]
 					}
 				}
@@ -229,11 +229,11 @@ func decodeResidualMB(sc *SliceContext, mbIdx int) {
 	// Chroma residual
 	if sc.ChromaArrayType != 0 && (mb.CBPChroma > 0 || (mb.MBType >= 1 && mb.MBType <= 24 && mb.CBPChroma > 0)) {
 		// Chroma DC for each component
-		for iCbCr := 0; iCbCr < 2; iCbCr++ {
+		for iCbCr := range 2 {
 			if mb.CBPChroma > 0 {
 				numDC := 4 // for 4:2:0
 				dcCoeffs := DecodeResidual(sc, mbIdx, CtxBlockCatChromaDC, iCbCr, numDC)
-				for j := 0; j < numDC; j++ {
+				for j := range numDC {
 					mb.ChromaDCLevel[iCbCr][j] = dcCoeffs[j]
 				}
 			}
@@ -241,11 +241,11 @@ func decodeResidualMB(sc *SliceContext, mbIdx int) {
 
 		// Chroma AC for each component and block
 		if mb.CBPChroma > 1 {
-			for iCbCr := 0; iCbCr < 2; iCbCr++ {
-				for i := 0; i < 4; i++ { // 4 blocks per component for 4:2:0
+			for iCbCr := range 2 {
+				for i := range 4 { // 4 blocks per component for 4:2:0
 					blkIdx := iCbCr*4 + i
 					acCoeffs := DecodeResidual(sc, mbIdx, CtxBlockCatChromaAC, blkIdx, 15)
-					for j := 0; j < 15; j++ {
+					for j := range 15 {
 						mb.ChromaACLevel[iCbCr][i][j] = acCoeffs[j]
 					}
 				}
@@ -292,7 +292,7 @@ func DecodeSliceDataCAVLC(br *cavlc.BitReader, sliceQPY int, mbWidth, mbHeight i
 	}
 
 	// Decode each macroblock (CAVLC has no end_of_slice_flag)
-	for mbIdx := 0; mbIdx < totalMBs; mbIdx++ {
+	for mbIdx := range totalMBs {
 		err := decodeMacroblockCAVLC(sc, mbIdx)
 		if err != nil {
 			return sc, fmt.Errorf("mb %d: %w", mbIdx, err)
@@ -330,7 +330,7 @@ func decodeMacroblockCAVLC(sc *SliceContext, mbIdx int) error {
 
 		if mb.TransformSize8x8 {
 			// I_8x8: decode 4 8x8 prediction modes
-			for i := 0; i < 4; i++ {
+			for i := range 4 {
 				prevFlag, rem, err := DecodeIntra4x4PredModeCAVLC(br)
 				if err != nil {
 					return err
@@ -348,7 +348,7 @@ func decodeMacroblockCAVLC(sc *SliceContext, mbIdx int) error {
 			}
 		} else {
 			// I_4x4: decode 16 4x4 prediction modes
-			for i := 0; i < 16; i++ {
+			for i := range 16 {
 				prevFlag, rem, err := DecodeIntra4x4PredModeCAVLC(br)
 				if err != nil {
 					return err
@@ -451,7 +451,7 @@ func decodeResidualMBCAVLC(sc *SliceContext, mbIdx int) error {
 		if err != nil {
 			return fmt.Errorf("i16x16 DC: %w", err)
 		}
-		for i := 0; i < 16; i++ {
+		for i := range 16 {
 			mb.Intra16x16DCLevel[i] = dcCoeffs[i]
 		}
 		// Store totalCoeff for DC (used for nC of AC blocks)
@@ -459,7 +459,7 @@ func decodeResidualMBCAVLC(sc *SliceContext, mbIdx int) error {
 
 		// AC levels (15 coefficients per 4x4 block)
 		if mb.CBPLuma > 0 {
-			for i := 0; i < 16; i++ {
+			for i := range 16 {
 				i8x8 := i / 4
 				if mb.CBPLuma&(1<<uint(i8x8)) != 0 {
 					nC := DeriveNC(sc, mbIdx, i, false)
@@ -467,7 +467,7 @@ func decodeResidualMBCAVLC(sc *SliceContext, mbIdx int) error {
 					if err != nil {
 						return fmt.Errorf("i16x16 AC[%d]: %w", i, err)
 					}
-					for j := 0; j < 15; j++ {
+					for j := range 15 {
 						mb.Intra16x16ACLevel[i][j] = acCoeffs[j]
 					}
 					mb.NzCoeffLuma[i] = tc
@@ -477,9 +477,9 @@ func decodeResidualMBCAVLC(sc *SliceContext, mbIdx int) error {
 	} else if mb.MBType == MBTypeINxN {
 		if mb.TransformSize8x8 {
 			// I_8x8: decode as 4 groups of 4 sub-blocks (each 16 coefficients)
-			for i8x8 := 0; i8x8 < 4; i8x8++ {
+			for i8x8 := range 4 {
 				if mb.CBPLuma&(1<<uint(i8x8)) != 0 {
-					for i4x4 := 0; i4x4 < 4; i4x4++ {
+					for i4x4 := range 4 {
 						blkIdx := i8x8*4 + i4x4
 						nC := DeriveNC(sc, mbIdx, blkIdx, false)
 						subCoeffs, tc, err := cavlc.DecodeResidualBlock(br, nC, 16)
@@ -488,7 +488,7 @@ func decodeResidualMBCAVLC(sc *SliceContext, mbIdx int) error {
 						}
 						// CAVLC sub-blocks use zigzagScan8x8CAVLC to map to raster positions.
 						// Store directly in raster order.
-						for j := 0; j < 16; j++ {
+						for j := range 16 {
 							mb.LumaLevel8x8[i8x8][zigzagScan8x8CAVLC[i4x4*16+j]] = subCoeffs[j]
 						}
 						mb.NzCoeffLuma[blkIdx] = tc
@@ -497,7 +497,7 @@ func decodeResidualMBCAVLC(sc *SliceContext, mbIdx int) error {
 			}
 		} else {
 			// I_4x4: decode 16 4x4 luma blocks
-			for i := 0; i < 16; i++ {
+			for i := range 16 {
 				i8x8 := i / 4
 				if mb.CBPLuma&(1<<uint(i8x8)) != 0 {
 					nC := DeriveNC(sc, mbIdx, i, false)
@@ -505,7 +505,7 @@ func decodeResidualMBCAVLC(sc *SliceContext, mbIdx int) error {
 					if err != nil {
 						return fmt.Errorf("i4x4[%d]: %w", i, err)
 					}
-					for j := 0; j < 16; j++ {
+					for j := range 16 {
 						mb.LumaLevel4x4[i][j] = coeffs[j]
 					}
 					mb.NzCoeffLuma[i] = tc
@@ -517,27 +517,27 @@ func decodeResidualMBCAVLC(sc *SliceContext, mbIdx int) error {
 	// Chroma residual
 	if sc.ChromaArrayType != 0 && mb.CBPChroma > 0 {
 		// Chroma DC for each component
-		for iCbCr := 0; iCbCr < 2; iCbCr++ {
+		for iCbCr := range 2 {
 			dcCoeffs, _, err := cavlc.DecodeResidualBlock(br, -1, 4)
 			if err != nil {
 				return fmt.Errorf("chroma DC[%d]: %w", iCbCr, err)
 			}
-			for j := 0; j < 4; j++ {
+			for j := range 4 {
 				mb.ChromaDCLevel[iCbCr][j] = dcCoeffs[j]
 			}
 		}
 
 		// Chroma AC for each component and block
 		if mb.CBPChroma > 1 {
-			for iCbCr := 0; iCbCr < 2; iCbCr++ {
-				for i := 0; i < 4; i++ {
+			for iCbCr := range 2 {
+				for i := range 4 {
 					blkIdx := iCbCr*4 + i
 					nC := DeriveChromaNC(sc, mbIdx, blkIdx)
 					acCoeffs, tc, err := cavlc.DecodeResidualBlock(br, nC, 15)
 					if err != nil {
 						return fmt.Errorf("chroma AC[%d][%d]: %w", iCbCr, i, err)
 					}
-					for j := 0; j < 15; j++ {
+					for j := range 15 {
 						mb.ChromaACLevel[iCbCr][i][j] = acCoeffs[j]
 					}
 					mb.NzCoeffChroma[blkIdx] = tc

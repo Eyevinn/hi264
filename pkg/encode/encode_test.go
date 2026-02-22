@@ -38,8 +38,8 @@ func TestEncodeDecode1x1(t *testing.T) {
 	}
 
 	// Check pixels
-	for y := 0; y < 16; y++ {
-		for x := 0; x < 16; x++ {
+	for y := range 16 {
+		for x := range 16 {
 			got := f.GetLumaPixel(x, y)
 			if got != 128 {
 				t.Errorf("luma(%d,%d) = %d, want 128", x, y, got)
@@ -220,8 +220,8 @@ func TestEncodeDecodeCABAC1x1(t *testing.T) {
 		t.Errorf("frame size %dx%d, want 16x16", f.Width, f.Height)
 	}
 
-	for y := 0; y < 16; y++ {
-		for x := 0; x < 16; x++ {
+	for y := range 16 {
+		for x := range 16 {
 			got := f.GetLumaPixel(x, y)
 			if got != 128 {
 				t.Errorf("luma(%d,%d) = %d, want 128", x, y, got)
@@ -443,9 +443,9 @@ func TestEncodePSkipCAVLC(t *testing.T) {
 	// Also check chroma
 	chromaW := idrFrame.Width / 2
 	chromaH := idrFrame.Height / 2
-	for y := 0; y < chromaH; y++ {
-		for x := 0; x < chromaW; x++ {
-			for c := 0; c < 2; c++ {
+	for y := range chromaH {
+		for x := range chromaW {
+			for c := range 2 {
 				got := pSkipFrame.GetChromaPixel(c, x, y)
 				want := idrFrame.GetChromaPixel(c, x, y)
 				if got != want {

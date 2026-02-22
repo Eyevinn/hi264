@@ -79,10 +79,7 @@ var chromaQPFromLuma = [52]int{
 }
 
 func chromaQPForDeblock(lumaQP, chromaQPIndexOffset int) int {
-	qpi := lumaQP + chromaQPIndexOffset
-	if qpi < 0 {
-		qpi = 0
-	}
+	qpi := max(lumaQP+chromaQPIndexOffset, 0)
 	if qpi > 51 {
 		qpi = 51
 	}
@@ -207,7 +204,7 @@ func filterLumaIntraV(plane []uint8, stride, edgeX, y0, indexA, indexB int) {
 		return
 	}
 
-	for d := 0; d < 16; d++ {
+	for d := range 16 {
 		off := (y0+d)*stride + edgeX
 
 		p0 := int(plane[off-1])
@@ -254,7 +251,7 @@ func filterLumaIntraH(plane []uint8, stride, x0, edgeY, indexA, indexB int) {
 		return
 	}
 
-	for d := 0; d < 16; d++ {
+	for d := range 16 {
 		x := x0 + d
 
 		p0 := int(plane[(edgeY-1)*stride+x])
@@ -306,7 +303,7 @@ func filterLumaNormalV(plane []uint8, stride, edgeX, y0, indexA, indexB, bS int)
 		return
 	}
 
-	for d := 0; d < 16; d++ {
+	for d := range 16 {
 		off := (y0+d)*stride + edgeX
 
 		p0 := int(plane[off-1])
@@ -354,7 +351,7 @@ func filterLumaNormalH(plane []uint8, stride, x0, edgeY, indexA, indexB, bS int)
 		return
 	}
 
-	for d := 0; d < 16; d++ {
+	for d := range 16 {
 		x := x0 + d
 
 		p0 := int(plane[(edgeY-1)*stride+x])
@@ -397,7 +394,7 @@ func filterChromaIntraV(plane []uint8, stride, edgeX, y0, indexA, indexB int) {
 		return
 	}
 
-	for d := 0; d < 8; d++ {
+	for d := range 8 {
 		off := (y0+d)*stride + edgeX
 
 		p0 := int(plane[off-1])
@@ -423,7 +420,7 @@ func filterChromaIntraH(plane []uint8, stride, x0, edgeY, indexA, indexB int) {
 		return
 	}
 
-	for d := 0; d < 8; d++ {
+	for d := range 8 {
 		x := x0 + d
 
 		p0 := int(plane[(edgeY-1)*stride+x])
@@ -454,7 +451,7 @@ func filterChromaNormalV(plane []uint8, stride, edgeX, y0, indexA, indexB, bS in
 		return
 	}
 
-	for d := 0; d < 8; d++ {
+	for d := range 8 {
 		off := (y0+d)*stride + edgeX
 
 		p0 := int(plane[off-1])
@@ -486,7 +483,7 @@ func filterChromaNormalH(plane []uint8, stride, x0, edgeY, indexA, indexB, bS in
 		return
 	}
 
-	for d := 0; d < 8; d++ {
+	for d := range 8 {
 		x := x0 + d
 
 		p0 := int(plane[(edgeY-1)*stride+x])

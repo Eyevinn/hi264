@@ -142,7 +142,7 @@ func (d *Decoder) AlignToByte() {
 // ReadBypassU reads n bypass bins and returns them as an unsigned integer (MSB first).
 func (d *Decoder) ReadBypassU(n int) uint32 {
 	var val uint32
-	for i := 0; i < n; i++ {
+	for range n {
 		val = (val << 1) | uint32(d.DecodeBypass())
 	}
 	return val

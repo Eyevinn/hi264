@@ -44,7 +44,7 @@ func (r *BitReader) ReadBits(n int) (uint32, error) {
 		return 0, fmt.Errorf("bitreader: invalid n=%d", n)
 	}
 	var val uint32
-	for i := 0; i < n; i++ {
+	for range n {
 		bit, err := r.ReadBit()
 		if err != nil {
 			return 0, err
@@ -67,7 +67,7 @@ func (r *BitReader) PeekBits(n int) (uint32, error) {
 	savedBitPos := r.bitPos
 	var val uint32
 	bitsRead := 0
-	for i := 0; i < n; i++ {
+	for range n {
 		bit, err := r.ReadBit()
 		if err != nil {
 			// Pad remaining bits with zeros
