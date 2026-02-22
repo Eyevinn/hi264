@@ -19,6 +19,8 @@ type EncodeParams struct {
 	MaxRefFrames   int            // max_num_ref_frames (0=IDR-only, 1+=P-frames)
 	ColorSpace     yuv.ColorSpace // YCbCr matrix standard (default BT601)
 	Range          yuv.Range      // sample value range (default LimitedRange)
+	FPS            int            // frame rate (used for level selection, 0 = ignore MBPS)
+	Kbps           int            // bitrate in kbit/s (used for level selection, 0 = ignore bitrate)
 }
 
 func (p *EncodeParams) validate() error {
@@ -46,11 +48,12 @@ func GenerateSPS(p EncodeParams) ([]byte, error) {
 	if err := p.validate(); err != nil {
 		return nil, err
 	}
+	level := ChooseLevel(p.Width, p.Height, p.FPS, p.Kbps, p.CABAC)
 	var rbsp []byte
 	if p.CABAC {
-		rbsp = EncodeSPSMain(p.Width, p.Height, p.MaxRefFrames, p.ColorSpace, p.Range)
+		rbsp = EncodeSPSMain(p.Width, p.Height, p.MaxRefFrames, level, p.ColorSpace, p.Range)
 	} else {
-		rbsp = EncodeSPS(p.Width, p.Height, p.MaxRefFrames, p.ColorSpace, p.Range)
+		rbsp = EncodeSPS(p.Width, p.Height, p.MaxRefFrames, level, p.ColorSpace, p.Range)
 	}
 	var buf bytes.Buffer
 	if err := WriteNALU(&buf, 7, 3, rbsp); err != nil {

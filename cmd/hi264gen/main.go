@@ -542,6 +542,8 @@ func generateH264(opts *options, frameW, frameH, mbWidth, mbHeight, disableDeblo
 		Height:          frameH,
 		ColorSpace:      cs,
 		Range:           rng,
+		FPS:             opts.fps,
+		Kbps:            opts.kbps,
 	}
 
 	// Write SPS+PPS once
@@ -689,12 +691,13 @@ func generateMP4(opts *options, frameW, frameH, mbWidth, mbHeight, disableDebloc
 	}
 
 	// Build SPS/PPS as raw NALUs (no start codes) for SetAVCDescriptor
+	level := encode.ChooseLevel(frameW, frameH, opts.fps, opts.kbps, opts.cabac)
 	var spsRBSP, ppsRBSP []byte
 	if opts.cabac {
-		spsRBSP = encode.EncodeSPSMain(frameW, frameH, maxRef, cs, rng)
+		spsRBSP = encode.EncodeSPSMain(frameW, frameH, maxRef, level, cs, rng)
 		ppsRBSP = encode.EncodePPSCABAC(disableDeblock)
 	} else {
-		spsRBSP = encode.EncodeSPS(frameW, frameH, maxRef, cs, rng)
+		spsRBSP = encode.EncodeSPS(frameW, frameH, maxRef, level, cs, rng)
 		ppsRBSP = encode.EncodePPS(disableDeblock)
 	}
 	spsNALU := encode.BuildNALU(7, 3, spsRBSP)
@@ -728,6 +731,8 @@ func generateMP4(opts *options, frameW, frameH, mbWidth, mbHeight, disableDebloc
 		Height:          frameH,
 		ColorSpace:      cs,
 		Range:           rng,
+		FPS:             opts.fps,
+		Kbps:            opts.kbps,
 	}
 
 	// Encode all frames and collect as MP4 samples

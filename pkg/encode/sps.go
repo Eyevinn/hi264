@@ -7,7 +7,8 @@ import (
 // EncodeSPS generates a minimal SPS RBSP for Baseline profile.
 // width and height are in pixels (must be even; non-16-multiples use frame cropping).
 // maxRef is the max_num_ref_frames value (0 for IDR-only, 1+ for P-frames).
-func EncodeSPS(width, height, maxRef int, cs yuv.ColorSpace, rng yuv.Range) []byte {
+// level is the level_idc value (e.g. 30 for Level 3.0); use ChooseLevel to compute.
+func EncodeSPS(width, height, maxRef, level int, cs yuv.ColorSpace, rng yuv.Range) []byte {
 	w := NewBitWriter()
 
 	mbWidth := (width + 15) / 16
@@ -18,8 +19,8 @@ func EncodeSPS(width, height, maxRef int, cs yuv.ColorSpace, rng yuv.Range) []by
 	// constraint_set0..5_flags + reserved_zero_2bits = 0xC0
 	// constraint_set0=1, constraint_set1=1 (Baseline compatible)
 	w.WriteBits(0xC0, 8)
-	// level_idc = 30 (Level 3.0, covers up to 720p)
-	w.WriteBits(30, 8)
+	// level_idc
+	w.WriteBits(uint32(level), 8)
 	// seq_parameter_set_id = 0
 	w.WriteUE(0)
 	// log2_max_frame_num_minus4 = 0
@@ -68,7 +69,8 @@ func EncodeSPS(width, height, maxRef int, cs yuv.ColorSpace, rng yuv.Range) []by
 // Main profile is required for CABAC entropy coding.
 // width and height are in pixels (must be even; non-16-multiples use frame cropping).
 // maxRef is the max_num_ref_frames value (0 for IDR-only, 1+ for P-frames).
-func EncodeSPSMain(width, height, maxRef int, cs yuv.ColorSpace, rng yuv.Range) []byte {
+// level is the level_idc value (e.g. 31 for Level 3.1); use ChooseLevel to compute.
+func EncodeSPSMain(width, height, maxRef, level int, cs yuv.ColorSpace, rng yuv.Range) []byte {
 	w := NewBitWriter()
 
 	mbWidth := (width + 15) / 16
@@ -79,8 +81,8 @@ func EncodeSPSMain(width, height, maxRef int, cs yuv.ColorSpace, rng yuv.Range) 
 	// constraint_set0..5_flags + reserved_zero_2bits
 	// constraint_set1=1 (Main compatible)
 	w.WriteBits(0x40, 8)
-	// level_idc = 30 (Level 3.0)
-	w.WriteBits(30, 8)
+	// level_idc
+	w.WriteBits(uint32(level), 8)
 	// seq_parameter_set_id = 0
 	w.WriteUE(0)
 	// log2_max_frame_num_minus4 = 0

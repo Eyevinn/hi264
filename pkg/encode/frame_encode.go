@@ -23,6 +23,8 @@ type FrameEncoder struct {
 	Height          int            // actual pixel height for SPS (0 = Grid.Height*16)
 	ColorSpace      yuv.ColorSpace // YCbCr matrix standard (default BT601)
 	Range           yuv.Range      // sample value range (default LimitedRange)
+	FPS             int            // frame rate for level selection (0 = ignore MBPS)
+	Kbps            int            // bitrate in kbit/s for level selection (0 = ignore)
 }
 
 // Encode produces an Annex-B bitstream containing SPS, PPS, and one IDR slice.
@@ -50,8 +52,9 @@ func (e *FrameEncoder) EncodeSPSPPS(buf *bytes.Buffer) error {
 		height = e.Height
 	}
 
+	level := ChooseLevel(width, height, e.FPS, e.Kbps, e.CABAC)
 	if e.CABAC {
-		spsRBSP := EncodeSPSMain(width, height, e.MaxNumRefFrames, e.ColorSpace, e.Range)
+		spsRBSP := EncodeSPSMain(width, height, e.MaxNumRefFrames, level, e.ColorSpace, e.Range)
 		if err := WriteNALU(buf, 7, 3, spsRBSP); err != nil {
 			return fmt.Errorf("write SPS: %w", err)
 		}
@@ -60,7 +63,7 @@ func (e *FrameEncoder) EncodeSPSPPS(buf *bytes.Buffer) error {
 			return fmt.Errorf("write PPS: %w", err)
 		}
 	} else {
-		spsRBSP := EncodeSPS(width, height, e.MaxNumRefFrames, e.ColorSpace, e.Range)
+		spsRBSP := EncodeSPS(width, height, e.MaxNumRefFrames, level, e.ColorSpace, e.Range)
 		if err := WriteNALU(buf, 7, 3, spsRBSP); err != nil {
 			return fmt.Errorf("write SPS: %w", err)
 		}

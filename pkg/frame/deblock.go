@@ -79,10 +79,7 @@ var chromaQPFromLuma = [52]int{
 }
 
 func chromaQPForDeblock(lumaQP, chromaQPIndexOffset int) int {
-	qpi := max(lumaQP+chromaQPIndexOffset, 0)
-	if qpi > 51 {
-		qpi = 51
-	}
+	qpi := min(max(lumaQP+chromaQPIndexOffset, 0), 51)
 	return chromaQPFromLuma[qpi]
 }
 
