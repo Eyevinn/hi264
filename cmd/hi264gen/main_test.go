@@ -843,6 +843,80 @@ func TestRunFormatFlag(t *testing.T) {
 	}
 }
 
+func TestRunImageBackgroundH264(t *testing.T) {
+	dir := t.TempDir()
+	out := filepath.Join(dir, "test.264")
+	img := "../../testdata/sunflowers_640x360.png"
+
+	err := run([]string{appName, "-gi", img, "-o", out})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	data, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.HasPrefix(data, []byte{0, 0, 0, 1}) {
+		t.Error("output should start with Annex-B start code")
+	}
+}
+
+func TestRunImageBackgroundScaled(t *testing.T) {
+	dir := t.TempDir()
+	out := filepath.Join(dir, "test.264")
+	img := "../../testdata/sunflowers_640x360.png"
+
+	err := run([]string{appName, "-gi", img, "-w", "320", "-h", "240", "-o", out})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	data, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(data) == 0 {
+		t.Error("empty output")
+	}
+}
+
+func TestRunImageBackground8x8WithText(t *testing.T) {
+	dir := t.TempDir()
+	out := filepath.Join(dir, "test.264")
+	img := "../../testdata/sunflowers_640x360.png"
+
+	err := run([]string{appName, "-gi", img, "-8x8", "-w", "320", "-h", "240",
+		"-n", "3", "-text", "%03d", "-o", out})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	data, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(data) == 0 {
+		t.Error("empty output")
+	}
+}
+
+func TestRunImageBackgroundMP4(t *testing.T) {
+	dir := t.TempDir()
+	out := filepath.Join(dir, "test.mp4")
+	img := "../../testdata/sunflowers_640x360.png"
+
+	err := run([]string{appName, "-gi", img, "-w", "320", "-h", "240",
+		"-n", "5", "-text", "%03d", "-o", out})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	info, err := os.Stat(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Size() == 0 {
+		t.Error("empty output")
+	}
+}
+
 func TestRunInvalidFormat(t *testing.T) {
 	err := run([]string{appName, "-smpte", "-w", "176", "-h", "80", "-f", "bmp", "-o", "out.bmp"})
 	if err == nil {

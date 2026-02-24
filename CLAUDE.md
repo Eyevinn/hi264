@@ -39,6 +39,7 @@ encoder verification tests.
 - Forward Hadamard transform + quantization (QP 0-51)
 - SPS/PPS generation (Baseline and Main profiles, configurable max_num_ref_frames)
 - PlaneGrid: direct Y/Cb/Cr value planes with 16x16 or 8x8 block granularity
+- PNG/JPEG image backgrounds (downsampled to block-resolution PlaneGrid)
 - Grid-based pattern input with RGB or YCbCr color specification
 - 8x8 block support: per-4x4-block AC residual encoding at quadrant boundaries
 - Forward 4x4 integer DCT (inverse of decoder's InverseTransform4x4)
@@ -140,6 +141,12 @@ go run ./cmd/hi264gen -w 320 -h 240 -n 50 -text "%03d" -bpp 8000 -o cbr_counter.
 # Pipe to stdout (requires -f to specify format)
 go run ./cmd/hi264gen -smpte -w 320 -h 240 -n 100 -text "%03d" -f 264 -o - | ffplay -i -
 go run ./cmd/hi264gen -smpte -w 320 -h 240 -n 100 -text "%03d" -f mp4 -o - | ffplay -i -
+
+# PNG/JPEG image as background (downsampled to block resolution)
+go run ./cmd/hi264gen -gi photo.png -o photo.264
+go run ./cmd/hi264gen -gi photo.png -w 320 -h 240 -o photo_scaled.264  # scale to cover
+go run ./cmd/hi264gen -gi photo.jpg -8x8 -o photo_8x8.264
+go run ./cmd/hi264gen -gi photo.png -w 320 -h 240 -text "%03d" -n 10 -o counter.mp4
 
 # Generate reference image from grid pattern (raw, no H.264 encoding)
 go run ./cmd/hi264gen -gi examples/sweden.gridimg -o expected.png

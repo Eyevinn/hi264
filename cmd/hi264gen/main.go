@@ -24,6 +24,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"image"
 	"io"
 	"os"
 	"path/filepath"
@@ -45,6 +46,7 @@ var usg = `%s - generate H.264 bitstreams or raw images from grid patterns.
 Usage:
 
   %s -gi pattern.gridimg -o output.264
+  %s -gi photo.png -w 320 -h 240 -text "%%03d" -o output.mp4
   %s -gi pattern.gridimg -w 176 -h 80 -n 10 -text "%%03d" -o output.264
   %s -w 176 -h 80 -n 10 -text "%%03d" -o output.264
   %s -smpte -w 320 -h 240 -n 100 -text "%%03d" -f 264 -o - | ffplay -i -
@@ -100,8 +102,10 @@ type options struct {
 	fullRange   bool
 	output      string
 	cpuProfile  string
-	blockSize   int  // grid block size (16 or 8), set from @8x8 directive or -8x8 flag
-	use8x8      bool // CLI flag to enable 8x8 block resolution
+	blockSize   int            // grid block size (16 or 8), set from @8x8 directive or -8x8 flag
+	use8x8      bool           // CLI flag to enable 8x8 block resolution
+	bgPlane     *yuv.PlaneGrid // PNG/JPEG image background (nil for .gridimg)
+	bgImage     image.Image    // source image for deferred scaling (nil after scaling)
 }
 
 func parseOptions(fs *flag.FlagSet, args []string) (*options, error) {
@@ -109,7 +113,7 @@ func parseOptions(fs *flag.FlagSet, args []string) (*options, error) {
 	fs.BoolVar(&opts.version, "version", false, "Get hi264 version")
 	fs.StringVar(&opts.grid, "gp", "", "grid pattern (rows separated by commas)")
 	fs.Var(&opts.colors, "gc", "color spec: char=Y,Cb,Cr (or R,G,B with -rgb) (repeatable)")
-	fs.StringVar(&opts.imgFile, "gi", "", "grid image file (.gridimg, alternative to -gp/-gc)")
+	fs.StringVar(&opts.imgFile, "gi", "", "grid image file (.gridimg/.png/.jpg/.jpeg, alternative to -gp/-gc)")
 	fs.StringVar(&opts.format, "f", "", "output format (264, mp4, y4m, yuv, png, jpg); required with -o -")
 	fs.BoolVar(&opts.rgb, "rgb", false, "interpret -gc color values as RGB instead of YCbCr")
 	fs.BoolVar(&opts.smpte, "smpte", false, "use 75% SMPTE color bars as pattern")
@@ -137,7 +141,7 @@ func parseOptions(fs *flag.FlagSet, args []string) (*options, error) {
 	fs.StringVar(&opts.cpuProfile, "cpuprofile", "", "write CPU profile to file")
 	fs.StringVar(&opts.output, "o", "", "output file (required)")
 	fs.Usage = func() {
-		fmt.Fprintf(os.Stderr, usg, appName, appName, appName, appName, appName)
+		fmt.Fprintf(os.Stderr, usg, appName, appName, appName, appName, appName, appName)
 		fs.PrintDefaults()
 	}
 	err := fs.Parse(args[1:])
@@ -297,27 +301,36 @@ func run(args []string) error {
 	}
 	isStdout := opts.output == "-"
 	hasGridInput := opts.imgFile != "" || opts.grid != "" || opts.smpte
-
 	if opts.smpte {
 		// Deferred: SMPTE grid created after mbWidth is known.
 	} else if opts.imgFile != "" {
-		f, ferr := os.Open(opts.imgFile)
-		if ferr != nil {
-			return ferr
-		}
-		defer f.Close()
-		res, perr := yuv.ParseImageFileFull(f, opts.rgb, cs, rng)
-		if perr != nil {
-			return fmt.Errorf("parsing image file: %w", perr)
-		}
-		patGrid = res.Grid
-		patColors = res.Colors
-		// File @8x8 directive overrides default, but CLI -8x8 flag takes priority
-		if !opts.use8x8 {
-			opts.blockSize = res.BlockSize
-		}
-		if opts.colorspace == "bt601" {
-			cs = res.CS
+		ext := strings.ToLower(filepath.Ext(opts.imgFile))
+		if ext == ".png" || ext == ".jpg" || ext == ".jpeg" {
+			img, ierr := yuv.LoadImage(opts.imgFile)
+			if ierr != nil {
+				return ierr
+			}
+			// Store source image; PlaneGrid created after dimensions are known
+			opts.bgImage = img
+		} else {
+			f, ferr := os.Open(opts.imgFile)
+			if ferr != nil {
+				return ferr
+			}
+			defer f.Close()
+			res, perr := yuv.ParseImageFileFull(f, opts.rgb, cs, rng)
+			if perr != nil {
+				return fmt.Errorf("parsing image file: %w", perr)
+			}
+			patGrid = res.Grid
+			patColors = res.Colors
+			// File @8x8 directive overrides default, but CLI -8x8 flag takes priority
+			if !opts.use8x8 {
+				opts.blockSize = res.BlockSize
+			}
+			if opts.colorspace == "bt601" {
+				cs = res.CS
+			}
 		}
 	} else if opts.grid != "" {
 		patGrid, err = yuv.ParseGrid(opts.grid)
@@ -395,6 +408,13 @@ func run(args []string) error {
 	if tiled {
 		frameW = opts.width
 		frameH = opts.height
+	} else if opts.bgImage != nil {
+		// Image mode without -w/-h: derive from image at block resolution
+		b := opts.bgImage.Bounds()
+		imgW := b.Max.X - b.Min.X
+		imgH := b.Max.Y - b.Min.Y
+		frameW = (imgW / opts.blockSize) * opts.blockSize
+		frameH = (imgH / opts.blockSize) * opts.blockSize
 	} else if opts.smpte {
 		frameW = 7 * 16
 		frameH = 16
@@ -405,6 +425,22 @@ func run(args []string) error {
 
 	mbWidth := (frameW + 15) / 16
 	mbHeight := (frameH + 15) / 16
+
+	// Create PlaneGrid from image now that target dimensions are known.
+	// With -w/-h: scale image to cover the target. Without: 1:1 block sampling.
+	if opts.bgImage != nil {
+		blockW := mbWidth * (16 / opts.blockSize)
+		blockH := mbHeight * (16 / opts.blockSize)
+		if tiled {
+			opts.bgPlane = yuv.ScaleImageToPlaneGrid(opts.bgImage, blockW, blockH, opts.blockSize, cs, rng)
+		} else {
+			opts.bgPlane = yuv.ImageToPlaneGrid(opts.bgImage, opts.blockSize, cs, rng)
+		}
+		opts.bgImage = nil // release source image
+		if opts.bgPlane.Width == 0 || opts.bgPlane.Height == 0 {
+			return fmt.Errorf("image %s too small for %dx%d blocks", opts.imgFile, opts.blockSize, opts.blockSize)
+		}
+	}
 
 	// Create SMPTE grid now that mbWidth is known.
 	// In 8x8 mode, distribute bars across block columns (8px granularity).
@@ -491,9 +527,39 @@ func run(args []string) error {
 // In tiled mode without text (tiled=true, text==""), the pattern
 // tiles to fill the frame.
 // blockSize is the block size for the pattern grid (16 or 8).
+// bgPlane is an optional PlaneGrid from a PNG/JPEG image; when set,
+// the PlaneGrid-based flow is used (tile + text overlay) instead of Grid.
 func buildFrameGrid(i int, patGrid *yuv.Grid, patColors yuv.ColorMap,
 	mbW, mbH, scale, fps int, text string, bg, fg yuv.Color,
-	textBg *yuv.Color, tiled bool, blockSize int) (*yuv.PlaneGrid, error) {
+	textBg *yuv.Color, tiled bool, blockSize int, bgPlane *yuv.PlaneGrid) (*yuv.PlaneGrid, error) {
+
+	// PlaneGrid-based flow for PNG/JPEG backgrounds
+	if bgPlane != nil {
+		pg := bgPlane
+		if tiled {
+			// Tile to fill the target frame
+			blockW := mbW * (16 / blockSize)
+			blockH := mbH * (16 / blockSize)
+			if pg.Width != blockW || pg.Height != blockH {
+				pg = yuv.TilePlaneGrid(pg, blockW, blockH)
+			}
+		}
+		if text != "" {
+			formatted := yuv.FormatText(text, i, fps)
+			// Clone so each frame gets a fresh copy for text overlay
+			clone := yuv.NewPlaneGrid(pg.Width, pg.Height, pg.BlockSize)
+			for y := range pg.Height {
+				copy(clone.Y[y], pg.Y[y])
+				copy(clone.Cb[y], pg.Cb[y])
+				copy(clone.Cr[y], pg.Cr[y])
+			}
+			if err := yuv.OverlayTextOnPlane(clone, formatted, scale, fg, textBg); err != nil {
+				return nil, err
+			}
+			return clone, nil
+		}
+		return pg, nil
+	}
 
 	var grid *yuv.Grid
 	var colors yuv.ColorMap
@@ -589,7 +655,7 @@ func generateH264(opts *options, frameW, frameH, mbWidth, mbHeight, disableDeblo
 	}
 
 	plane, err := buildFrameGrid(0, patGrid, patColors,
-		mbWidth, mbHeight, textScale, opts.fps, opts.text, bg, fg, textBg, tiled, opts.blockSize)
+		mbWidth, mbHeight, textScale, opts.fps, opts.text, bg, fg, textBg, tiled, opts.blockSize, opts.bgPlane)
 	if err != nil {
 		return err
 	}
@@ -663,7 +729,7 @@ func generateH264AllIDR(f io.Writer, opts *options, frameW, frameH, mbWidth, mbH
 
 	for i := range opts.numFrames {
 		plane, err := buildFrameGrid(i, patGrid, patColors,
-			mbWidth, mbHeight, textScale, opts.fps, opts.text, bg, fg, textBg, tiled, opts.blockSize)
+			mbWidth, mbHeight, textScale, opts.fps, opts.text, bg, fg, textBg, tiled, opts.blockSize, opts.bgPlane)
 		if err != nil {
 			return err
 		}
@@ -701,7 +767,7 @@ func generateH264WithPSkip(f io.Writer, opts *options, mbWidth, mbHeight int,
 	for i := range opts.numFrames {
 		if i%opts.idrInterval == 0 {
 			plane, err := buildFrameGrid(i, patGrid, patColors,
-				mbWidth, mbHeight, textScale, opts.fps, opts.text, bg, fg, textBg, tiled, opts.blockSize)
+				mbWidth, mbHeight, textScale, opts.fps, opts.text, bg, fg, textBg, tiled, opts.blockSize, opts.bgPlane)
 			if err != nil {
 				return err
 			}
@@ -776,7 +842,7 @@ func generateMP4(opts *options, frameW, frameH, mbWidth, mbHeight, disableDebloc
 
 	// Create encoder for frame generation
 	plane, err := buildFrameGrid(0, patGrid, patColors,
-		mbWidth, mbHeight, textScale, opts.fps, opts.text, bg, fg, textBg, tiled, opts.blockSize)
+		mbWidth, mbHeight, textScale, opts.fps, opts.text, bg, fg, textBg, tiled, opts.blockSize, opts.bgPlane)
 	if err != nil {
 		return err
 	}
@@ -807,7 +873,8 @@ func generateMP4(opts *options, frameW, frameH, mbWidth, mbHeight, disableDebloc
 		for i := range opts.numFrames {
 			if i%opts.idrInterval == 0 {
 				pg, err := buildFrameGrid(i, patGrid, patColors,
-					mbWidth, mbHeight, textScale, opts.fps, opts.text, bg, fg, textBg, tiled, opts.blockSize)
+					mbWidth, mbHeight, textScale, opts.fps, opts.text, bg, fg,
+					textBg, tiled, opts.blockSize, opts.bgPlane)
 				if err != nil {
 					return err
 				}
@@ -837,7 +904,7 @@ func generateMP4(opts *options, frameW, frameH, mbWidth, mbHeight, disableDebloc
 	} else {
 		for i := range opts.numFrames {
 			pg, err := buildFrameGrid(i, patGrid, patColors,
-				mbWidth, mbHeight, textScale, opts.fps, opts.text, bg, fg, textBg, tiled, opts.blockSize)
+				mbWidth, mbHeight, textScale, opts.fps, opts.text, bg, fg, textBg, tiled, opts.blockSize, opts.bgPlane)
 			if err != nil {
 				return err
 			}
@@ -931,7 +998,7 @@ func generateY4M(opts *options, frameW, frameH, mbWidth, mbHeight int,
 
 	for i := range opts.numFrames {
 		pg, err := buildFrameGrid(i, patGrid, patColors,
-			mbWidth, mbHeight, textScale, opts.fps, opts.text, bg, fg, textBg, tiled, opts.blockSize)
+			mbWidth, mbHeight, textScale, opts.fps, opts.text, bg, fg, textBg, tiled, opts.blockSize, opts.bgPlane)
 		if err != nil {
 			return err
 		}
@@ -957,7 +1024,7 @@ func generateFormattedImages(opts *options, frameW, frameH, mbWidth, mbHeight in
 
 	for i := range opts.numFrames {
 		pg, err := buildFrameGrid(i, patGrid, patColors,
-			mbWidth, mbHeight, textScale, opts.fps, opts.text, bg, fg, textBg, tiled, opts.blockSize)
+			mbWidth, mbHeight, textScale, opts.fps, opts.text, bg, fg, textBg, tiled, opts.blockSize, opts.bgPlane)
 		if err != nil {
 			return err
 		}
@@ -998,7 +1065,7 @@ func generateYUV(opts *options, frameW, frameH, mbWidth, mbHeight int,
 
 	for i := range opts.numFrames {
 		pg, err := buildFrameGrid(i, patGrid, patColors,
-			mbWidth, mbHeight, textScale, opts.fps, opts.text, bg, fg, textBg, tiled, opts.blockSize)
+			mbWidth, mbHeight, textScale, opts.fps, opts.text, bg, fg, textBg, tiled, opts.blockSize, opts.bgPlane)
 		if err != nil {
 			return err
 		}
@@ -1023,7 +1090,7 @@ func generateNumberedImages(opts *options, frameW, frameH, mbWidth, mbHeight int
 
 	for i := range opts.numFrames {
 		pg, err := buildFrameGrid(i, patGrid, patColors,
-			mbWidth, mbHeight, textScale, opts.fps, opts.text, bg, fg, textBg, tiled, opts.blockSize)
+			mbWidth, mbHeight, textScale, opts.fps, opts.text, bg, fg, textBg, tiled, opts.blockSize, opts.bgPlane)
 		if err != nil {
 			return err
 		}
