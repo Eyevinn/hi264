@@ -1,6 +1,8 @@
 package yuv
 
 import (
+	"image"
+	"image/color"
 	"testing"
 )
 
@@ -248,5 +250,297 @@ func TestBuildFrameFromPlaneGrid8x8(t *testing.T) {
 	// Bottom-right 8x8 should be 150
 	if f.GetLumaPixel(8, 8) != 150 {
 		t.Errorf("luma(8,8) = %d, want 150", f.GetLumaPixel(8, 8))
+	}
+}
+
+func TestImageToPlaneGrid16(t *testing.T) {
+	img, err := LoadImage("../../testdata/sunflowers_640x360.png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pg := ImageToPlaneGrid(img, 16, BT601, LimitedRange)
+	// 640/16 = 40, 360/16 = 22 (360 rounds down: 22*16=352)
+	if pg.Width != 40 || pg.Height != 22 {
+		t.Errorf("got %dx%d, want 40x22", pg.Width, pg.Height)
+	}
+	if pg.BlockSize != 16 {
+		t.Errorf("BlockSize = %d, want 16", pg.BlockSize)
+	}
+	// Verify non-trivial Y values (image is not all black)
+	hasNonZero := false
+	for y := range pg.Height {
+		for x := range pg.Width {
+			if pg.Y[y][x] > 16 {
+				hasNonZero = true
+				break
+			}
+		}
+		if hasNonZero {
+			break
+		}
+	}
+	if !hasNonZero {
+		t.Error("all Y values are <=16, expected non-black content")
+	}
+}
+
+func TestImageToPlaneGrid8(t *testing.T) {
+	img, err := LoadImage("../../testdata/sunflowers_640x360.png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pg := ImageToPlaneGrid(img, 8, BT601, LimitedRange)
+	// 640/8 = 80, 360/8 = 45
+	if pg.Width != 80 || pg.Height != 45 {
+		t.Errorf("got %dx%d, want 80x45", pg.Width, pg.Height)
+	}
+	if pg.BlockSize != 8 {
+		t.Errorf("BlockSize = %d, want 8", pg.BlockSize)
+	}
+}
+
+func TestImageToPlaneGridSyntheticRed(t *testing.T) {
+	// Create a 16x16 solid red image
+	img := image.NewRGBA(image.Rect(0, 0, 16, 16))
+	for y := range 16 {
+		for x := range 16 {
+			img.Set(x, y, color.RGBA{R: 255, G: 0, B: 0, A: 255})
+		}
+	}
+	pg := ImageToPlaneGrid(img, 16, BT601, LimitedRange)
+	if pg.Width != 1 || pg.Height != 1 {
+		t.Fatalf("got %dx%d, want 1x1", pg.Width, pg.Height)
+	}
+	expected := RGBToYCbCrCS(255, 0, 0, BT601, LimitedRange)
+	if pg.Y[0][0] != expected.Y || pg.Cb[0][0] != expected.Cb || pg.Cr[0][0] != expected.Cr {
+		t.Errorf("got Y=%d Cb=%d Cr=%d, want Y=%d Cb=%d Cr=%d",
+			pg.Y[0][0], pg.Cb[0][0], pg.Cr[0][0], expected.Y, expected.Cb, expected.Cr)
+	}
+}
+
+func TestScaleImageToPlaneGrid(t *testing.T) {
+	img, err := LoadImage("../../testdata/sunflowers_640x360.png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Scale 640x360 image to 20x15 blocks (320x240 pixels at BlockSize=16)
+	pg := ScaleImageToPlaneGrid(img, 20, 15, 16, BT601, LimitedRange)
+	if pg.Width != 20 || pg.Height != 15 {
+		t.Errorf("got %dx%d, want 20x15", pg.Width, pg.Height)
+	}
+	if pg.BlockSize != 16 {
+		t.Errorf("BlockSize = %d, want 16", pg.BlockSize)
+	}
+	hasNonZero := false
+	for y := range pg.Height {
+		for x := range pg.Width {
+			if pg.Y[y][x] > 16 {
+				hasNonZero = true
+				break
+			}
+		}
+		if hasNonZero {
+			break
+		}
+	}
+	if !hasNonZero {
+		t.Error("all Y values are <=16, expected non-black content")
+	}
+}
+
+func TestScaleImageToPlaneGridUpscale(t *testing.T) {
+	// Create 2x2 image, scale to 4x4 blocks
+	img := image.NewRGBA(image.Rect(0, 0, 2, 2))
+	img.Set(0, 0, color.RGBA{R: 255, A: 255})
+	img.Set(1, 0, color.RGBA{G: 255, A: 255})
+	img.Set(0, 1, color.RGBA{B: 255, A: 255})
+	img.Set(1, 1, color.RGBA{R: 255, G: 255, B: 255, A: 255})
+
+	pg := ScaleImageToPlaneGrid(img, 4, 4, 8, BT601, LimitedRange)
+	if pg.Width != 4 || pg.Height != 4 {
+		t.Fatalf("got %dx%d, want 4x4", pg.Width, pg.Height)
+	}
+	// Top-left 2x2 blocks should all be the red pixel's YCbCr
+	red := RGBToYCbCrCS(255, 0, 0, BT601, LimitedRange)
+	if pg.Y[0][0] != red.Y || pg.Y[1][0] != red.Y || pg.Y[0][1] != red.Y || pg.Y[1][1] != red.Y {
+		t.Errorf("top-left quadrant not uniformly red: Y[0][0]=%d Y[1][0]=%d Y[0][1]=%d Y[1][1]=%d, want %d",
+			pg.Y[0][0], pg.Y[1][0], pg.Y[0][1], pg.Y[1][1], red.Y)
+	}
+}
+
+func TestTilePlaneGrid(t *testing.T) {
+	src := NewPlaneGrid(2, 2, 16)
+	src.Y[0][0] = 10
+	src.Y[0][1] = 20
+	src.Y[1][0] = 30
+	src.Y[1][1] = 40
+	src.Cb[0][0] = 100
+	src.Cr[0][0] = 200
+
+	pg := TilePlaneGrid(src, 6, 4)
+	if pg.Width != 6 || pg.Height != 4 {
+		t.Fatalf("got %dx%d, want 6x4", pg.Width, pg.Height)
+	}
+	if pg.BlockSize != 16 {
+		t.Errorf("BlockSize = %d, want 16", pg.BlockSize)
+	}
+
+	// Check modular repetition
+	for y := range 4 {
+		for x := range 6 {
+			want := src.Y[y%2][x%2]
+			if pg.Y[y][x] != want {
+				t.Errorf("Y[%d][%d] = %d, want %d", y, x, pg.Y[y][x], want)
+			}
+		}
+	}
+	// Check chroma tiling
+	if pg.Cb[0][0] != 100 || pg.Cb[2][0] != 100 || pg.Cb[0][2] != 100 {
+		t.Error("Cb not tiled correctly")
+	}
+	if pg.Cr[0][0] != 200 || pg.Cr[2][0] != 200 || pg.Cr[0][4] != 200 {
+		t.Error("Cr not tiled correctly")
+	}
+}
+
+func TestOverlayTextOnPlane(t *testing.T) {
+	// Create a 10x5 PlaneGrid at BlockSize=16 with known values
+	pg := NewPlaneGrid(10, 5, 16)
+	for y := range pg.Height {
+		for x := range pg.Width {
+			pg.Y[y][x] = 100
+			pg.Cb[y][x] = 128
+			pg.Cr[y][x] = 128
+		}
+	}
+
+	fg := Color{Y: 235, Cb: 128, Cr: 200}
+	err := OverlayTextOnPlane(pg, "A", 1, fg, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// After overlay, some cells should have fg color (glyph pixels)
+	// and others should remain unchanged (100, 128, 128)
+	hasFg := false
+	hasOrig := false
+	for y := range pg.Height {
+		for x := range pg.Width {
+			if pg.Y[y][x] == fg.Y && pg.Cr[y][x] == fg.Cr {
+				hasFg = true
+			}
+			if pg.Y[y][x] == 100 {
+				hasOrig = true
+			}
+		}
+	}
+	if !hasFg {
+		t.Error("no foreground pixels found after overlay")
+	}
+	if !hasOrig {
+		t.Error("no original pixels preserved after overlay")
+	}
+}
+
+func TestOverlayTextOnPlane8x8(t *testing.T) {
+	// Create a 20x10 PlaneGrid at BlockSize=8 (10x5 MBs)
+	pg := NewPlaneGrid(20, 10, 8)
+	for y := range pg.Height {
+		for x := range pg.Width {
+			pg.Y[y][x] = 50
+			pg.Cb[y][x] = 128
+			pg.Cr[y][x] = 128
+		}
+	}
+
+	fg := Color{Y: 235, Cb: 128, Cr: 128}
+	err := OverlayTextOnPlane(pg, "A", 1, fg, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	hasFg := false
+	hasOrig := false
+	for y := range pg.Height {
+		for x := range pg.Width {
+			if pg.Y[y][x] == 235 {
+				hasFg = true
+			}
+			if pg.Y[y][x] == 50 {
+				hasOrig = true
+			}
+		}
+	}
+	if !hasFg {
+		t.Error("no foreground pixels found after 8x8 overlay")
+	}
+	if !hasOrig {
+		t.Error("no original pixels preserved after 8x8 overlay")
+	}
+}
+
+func TestOverlayTextOnPlaneTooLarge(t *testing.T) {
+	pg := NewPlaneGrid(2, 2, 16)
+	err := OverlayTextOnPlane(pg, "HELLO WORLD", 3, Color{235, 128, 128}, nil)
+	if err == nil {
+		t.Error("expected error for text too large")
+	}
+}
+
+func TestOverlayTextOnPlaneWithBg(t *testing.T) {
+	pg := NewPlaneGrid(20, 20, 8)
+	for y := range pg.Height {
+		for x := range pg.Width {
+			pg.Y[y][x] = 100
+			pg.Cb[y][x] = 128
+			pg.Cr[y][x] = 128
+		}
+	}
+	textBg := Color{Y: 42, Cb: 128, Cr: 128}
+	err := OverlayTextOnPlane(pg, "A", 1, Color{235, 128, 128}, &textBg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hasBg := false
+	for y := range pg.Height {
+		for x := range pg.Width {
+			if pg.Y[y][x] == 42 {
+				hasBg = true
+				break
+			}
+		}
+	}
+	if !hasBg {
+		t.Error("no text background pixels found")
+	}
+}
+
+func TestImageToPlaneGridTooSmall(t *testing.T) {
+	// Image smaller than one block should return 0x0 grid
+	img := image.NewRGBA(image.Rect(0, 0, 5, 5))
+	pg := ImageToPlaneGrid(img, 16, BT601, LimitedRange)
+	if pg.Width != 0 || pg.Height != 0 {
+		t.Errorf("got %dx%d, want 0x0", pg.Width, pg.Height)
+	}
+}
+
+func TestBlockValClamping(t *testing.T) {
+	// Create a 3x3 grid (odd) with BlockSize=8 → 1 MB wide, but chroma
+	// needs blockVal to clamp bx=2 to 2 (width-1).
+	pg := NewPlaneGrid(3, 3, 8)
+	pg.Cb[0][2] = 42
+	pg.Cb[2][0] = 99
+	// Access past bounds should clamp
+	cb, _ := pg.MBChromaSub(1, 1)
+	// MB(1,1) → bx=2,by=2; bx+1=3 >= Width=3 → clamped to 2
+	if cb[3] != pg.Cb[2][2] {
+		t.Errorf("Cb BR = %d, want %d (clamped)", cb[3], pg.Cb[2][2])
+	}
+}
+
+func TestLoadImageError(t *testing.T) {
+	_, err := LoadImage("nonexistent.png")
+	if err == nil {
+		t.Error("expected error for missing file")
 	}
 }

@@ -25,6 +25,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Auto-selection of 2× font for even text scales (2, 4, 6…) in 16×16 mode, giving sharper glyphs without requiring `-8x8`
 - `UpscaleGrid()` helper to tile 16×16 pattern backgrounds at 8×8 block resolution for the 2× font path
 
+#### PNG/JPEG image backgrounds
+- `-gi photo.png` / `-gi photo.jpg` for using PNG/JPEG images as backgrounds
+  - Without `-w`/`-h`: uses native image dimensions at 1:1 block sampling
+  - With `-w`/`-h`: scales image to cover target resolution (area averaging directly to block resolution, no pixel-resolution intermediate)
+  - Works with all output formats (H.264, MP4, Y4M, YUV, PNG, JPEG)
+  - Supports text overlay (`-text`) and 8×8 mode (`-8x8`)
+- `pkg/yuv.LoadImage()` for decoding PNG/JPEG files
+- `pkg/yuv.ImageToPlaneGrid()` for 1:1 block-resolution sampling
+- `pkg/yuv.ScaleImageToPlaneGrid()` for scaling to arbitrary block dimensions
+- `pkg/yuv.OverlayTextOnPlane()` for text rendering directly on PlaneGrid
+- `pkg/yuv.TilePlaneGrid()` for tiling a PlaneGrid to larger dimensions
+
 ### Changed
 - Minimal Go version 1.24
 - Ran `go fix` to modernize the code
@@ -32,6 +44,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Breaking:** Text character set reduced to match both fonts: A-Z 0-9 and `! # % + - . / : = ? [ ] _ ( )` plus space. Removed lowercase glyphs (a-z) and rarely-used punctuation (`" $ & ' * , ; < > @ \ ^ { | } ~`). Lowercase input is now auto-uppercased.
 - SMPTE bars distribute at 8×8 block-column granularity in `-8x8` mode for more even bar widths
 - `examples/sweden.gridimg` updated to more widely recognized digital flag colors (#005293 blue, #FECB00 yellow)
+- `-gi` flag now accepts `.png`, `.jpg`, `.jpeg` in addition to `.gridimg`
 - Internal: `BuildFrame` rewired through PlaneGrid; all CLI output paths use PlaneGrid as intermediate
 
 ### Fixed

@@ -3,7 +3,11 @@ package yuv
 import (
 	"bufio"
 	"fmt"
+	"image"
+	_ "image/jpeg"
+	_ "image/png"
 	"io"
+	"os"
 	"strings"
 )
 
@@ -14,10 +18,11 @@ func ParseImageFile(r io.Reader, isRGB bool) (*Grid, ColorMap, error) {
 	return grid, colors, err
 }
 
-// ImageFileResult holds the parsed result of a .gridimg file.
+// ImageFileResult holds the parsed result of a .gridimg or image file.
 type ImageFileResult struct {
-	Grid      *Grid
-	Colors    ColorMap
+	Grid      *Grid      // set for .gridimg
+	Colors    ColorMap   // set for .gridimg
+	Plane     *PlaneGrid // set for PNG/JPEG
 	CS        ColorSpace
 	BlockSize int // 16 (default) or 8
 }
@@ -148,4 +153,18 @@ func ParseImageFileFull(r io.Reader, isRGB bool, cs ColorSpace, rng Range) (*Ima
 		CS:        cs,
 		BlockSize: blockSize,
 	}, nil
+}
+
+// LoadImage reads a PNG or JPEG file and returns the decoded image.
+func LoadImage(path string) (image.Image, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	img, _, err := image.Decode(f)
+	if err != nil {
+		return nil, fmt.Errorf("decode image %s: %w", path, err)
+	}
+	return img, nil
 }

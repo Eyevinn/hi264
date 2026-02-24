@@ -139,6 +139,13 @@ go run ./cmd/hi264gen -w 320 -h 240 -n 50 -text "%03d" -kbps 1000 -o cbr_counter
 go run ./cmd/hi264gen -smpte -w 320 -h 240 -n 100 -text "%03d" -f 264 -o - | ffplay -i -
 go run ./cmd/hi264gen -smpte -w 320 -h 240 -n 100 -text "%03d" -f mp4 -o - | ffplay -i -
 
+# PNG/JPEG image as background (downsampled to block resolution)
+go run ./cmd/hi264gen -gi photo.png -o photo.264                                        # native resolution
+go run ./cmd/hi264gen -gi photo.png -w 320 -h 240 -o photo_scaled.264                   # scale to cover
+go run ./cmd/hi264gen -gi photo.jpg -8x8 -o photo_8x8.264                               # 8x8 block detail
+go run ./cmd/hi264gen -gi photo.png -w 320 -h 240 -text "%03d" -n 10 -o counter.mp4     # scale + text
+go run ./cmd/hi264gen -gi photo.png -o roundtrip.png                                     # raw PNG output
+
 # Raw image output (no H.264 encoding, useful as decoder reference)
 go run ./cmd/hi264gen -gi examples/sweden.gridimg -o sweden.png
 go run ./cmd/hi264gen -gi examples/sweden.gridimg -o sweden.yuv
@@ -159,7 +166,7 @@ Flags:
 
 | Flag | Description | Default |
 |---|---|---|
-| `-gi` | Grid image file (`.gridimg`) | — |
+| `-gi` | Grid image file (`.gridimg`, `.png`, `.jpg`, `.jpeg`) | — |
 | `-gp` | Inline grid pattern (e.g. `"xy,yx"`) | — |
 | `-gc` | Grid color mapping (repeatable, e.g. `x=235,128,128` YCbCr or RGB with `-rgb`) | — |
 | `-f` | Output format (`264`, `mp4`, `y4m`, `yuv`, `png`, `jpg`); required with `-o -` | auto-detect |
