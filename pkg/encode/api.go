@@ -101,6 +101,26 @@ func GenerateIDR(p EncodeParams, grid *yuv.Grid, colors yuv.ColorMap, idrPicID u
 	return enc.EncodeSlice(idrPicID)
 }
 
+// GenerateIDRFromPlane encodes an IDR frame from a PlaneGrid.
+// Returns the IDR slice NALU in Annex-B format (no SPS/PPS).
+func GenerateIDRFromPlane(p EncodeParams, plane *yuv.PlaneGrid, idrPicID uint32) ([]byte, error) {
+	if err := p.validate(); err != nil {
+		return nil, err
+	}
+	enc := &FrameEncoder{
+		Plane:           plane,
+		QP:              p.qp(),
+		DisableDeblock:  p.DisableDeblock,
+		CABAC:           p.CABAC,
+		MaxNumRefFrames: p.MaxRefFrames,
+		Width:           p.Width,
+		Height:          p.Height,
+		ColorSpace:      p.ColorSpace,
+		Range:           p.Range,
+	}
+	return enc.EncodeSlice(idrPicID)
+}
+
 // GeneratePSkip returns a P_Skip slice NALU in Annex-B format.
 func GeneratePSkip(p EncodeParams, frameNum uint32) ([]byte, error) {
 	if err := p.validate(); err != nil {

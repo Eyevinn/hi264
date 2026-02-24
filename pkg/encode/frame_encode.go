@@ -15,6 +15,7 @@ import (
 type FrameEncoder struct {
 	Grid            *yuv.Grid
 	Colors          yuv.ColorMap
+	Plane           *yuv.PlaneGrid // alternative to Grid+Colors; takes priority if set
 	QP              int
 	DisableDeblock  int            // 0=enable, 1=disable
 	CABAC           bool           // use CABAC entropy coding (Main profile) instead of CAVLC (Baseline)
@@ -25,6 +26,32 @@ type FrameEncoder struct {
 	Range           yuv.Range      // sample value range (default LimitedRange)
 	FPS             int            // frame rate for level selection (0 = ignore MBPS)
 	Kbps            int            // bitrate in kbit/s for level selection (0 = ignore)
+}
+
+// plane returns the PlaneGrid to use for encoding, converting Grid+Colors if needed.
+func (e *FrameEncoder) plane() (*yuv.PlaneGrid, error) {
+	if e.Plane != nil {
+		return e.Plane, nil
+	}
+	return yuv.GridToPlaneGrid(e.Grid, e.Colors)
+}
+
+// frameDimensions returns the frame width and height in pixels.
+func (e *FrameEncoder) frameDimensions() (width, height int) {
+	if e.Plane != nil {
+		width = e.Plane.PixelWidth()
+		height = e.Plane.PixelHeight()
+	} else {
+		width = e.Grid.Width * 16
+		height = e.Grid.Height * 16
+	}
+	if e.Width > 0 {
+		width = e.Width
+	}
+	if e.Height > 0 {
+		height = e.Height
+	}
+	return width, height
 }
 
 // Encode produces an Annex-B bitstream containing SPS, PPS, and one IDR slice.
@@ -43,14 +70,7 @@ func (e *FrameEncoder) Encode() ([]byte, error) {
 
 // EncodeSPSPPS writes SPS and PPS NALUs to buf (profile-aware).
 func (e *FrameEncoder) EncodeSPSPPS(buf *bytes.Buffer) error {
-	width := e.Grid.Width * 16
-	height := e.Grid.Height * 16
-	if e.Width > 0 {
-		width = e.Width
-	}
-	if e.Height > 0 {
-		height = e.Height
-	}
+	width, height := e.frameDimensions()
 
 	level := ChooseLevel(width, height, e.FPS, e.Kbps, e.CABAC)
 	if e.CABAC {
@@ -88,14 +108,7 @@ func (e *FrameEncoder) EncodeSlice(idrPicID uint32) ([]byte, error) {
 // frameNum is the frame_num value for this slice.
 // Returns an Annex-B framed non-IDR NALU (type=1, ref_idc=2).
 func (e *FrameEncoder) EncodePSkipSlice(frameNum uint32) ([]byte, error) {
-	width := e.Grid.Width * 16
-	height := e.Grid.Height * 16
-	if e.Width > 0 {
-		width = e.Width
-	}
-	if e.Height > 0 {
-		height = e.Height
-	}
+	width, height := e.frameDimensions()
 	sps := &avc.SPS{
 		Width:            uint(width),
 		Height:           uint(height),
@@ -111,10 +124,14 @@ func (e *FrameEncoder) EncodePSkipSlice(frameNum uint32) ([]byte, error) {
 }
 
 func (e *FrameEncoder) encodeSliceCAVLC(idrPicID uint32) ([]byte, error) {
-	width := e.Grid.Width * 16
-	height := e.Grid.Height * 16
-	mbWidth := e.Grid.Width
-	mbHeight := e.Grid.Height
+	pg, err := e.plane()
+	if err != nil {
+		return nil, err
+	}
+	mbWidth := pg.MBWidth()
+	mbHeight := pg.MBHeight()
+	width := mbWidth * 16
+	height := mbHeight * 16
 
 	qpDelta := int32(e.QP - 26) // pic_init_qp = 26, so delta = QP - 26
 
@@ -148,13 +165,10 @@ func (e *FrameEncoder) encodeSliceCAVLC(idrPicID uint32) ([]byte, error) {
 
 	for mbY := range mbHeight {
 		for mbX := range mbWidth {
-			ch := e.Grid.Chars[mbY][mbX]
-			c, ok := e.Colors[ch]
-			if !ok {
-				return nil, fmt.Errorf("no color for char %q at (%d,%d)", string(ch), mbX, mbY)
-			}
+			lumaVals := pg.MBLumaValues(mbX, mbY)
+			cbVals, crVals := pg.MBChromaSub(mbX, mbY)
 
-			err := e.encodeMB(sliceW, mbX, mbY, c, mbWidth, mbHeight,
+			err := e.encodeMBPlane(sliceW, mbX, mbY, lumaVals, cbVals, crVals,
 				nCLuma, nCCb, nCCr, reconY, strideY, reconCb, reconCr, strideC)
 			if err != nil {
 				return nil, fmt.Errorf("encode MB (%d,%d): %w", mbX, mbY, err)
@@ -168,8 +182,7 @@ func (e *FrameEncoder) encodeSliceCAVLC(idrPicID uint32) ([]byte, error) {
 
 	var buf bytes.Buffer
 	sliceRBSP := sliceW.Bytes()
-	err := WriteNALU(&buf, 5, 3, sliceRBSP)
-	if err != nil {
+	if err := WriteNALU(&buf, 5, 3, sliceRBSP); err != nil {
 		return nil, fmt.Errorf("write IDR: %w", err)
 	}
 
@@ -185,10 +198,14 @@ type encMBState struct {
 }
 
 func (e *FrameEncoder) encodeSliceCABAC(idrPicID uint32) ([]byte, error) {
-	width := e.Grid.Width * 16
-	height := e.Grid.Height * 16
-	mbWidth := e.Grid.Width
-	mbHeight := e.Grid.Height
+	pg, err := e.plane()
+	if err != nil {
+		return nil, err
+	}
+	mbWidth := pg.MBWidth()
+	mbHeight := pg.MBHeight()
+	width := mbWidth * 16
+	height := mbHeight * 16
 
 	// Build slice header with CABAC alignment
 	qpDelta := int32(e.QP - 26)
@@ -214,14 +231,12 @@ func (e *FrameEncoder) encodeSliceCABAC(idrPicID uint32) ([]byte, error) {
 
 	for mbY := range mbHeight {
 		for mbX := range mbWidth {
-			ch := e.Grid.Chars[mbY][mbX]
-			c, ok := e.Colors[ch]
-			if !ok {
-				return nil, fmt.Errorf("no color for char %q at (%d,%d)", string(ch), mbX, mbY)
-			}
+			lumaVals := pg.MBLumaValues(mbX, mbY)
+			cbVals, crVals := pg.MBChromaSub(mbX, mbY)
 
 			mbIdx := mbY*mbWidth + mbX
-			err := e.encodeMBCABAC(enc, ctx, mbStates, mbIdx, mbX, mbY, c,
+			err := e.encodeMBCABACPlane(enc, ctx, mbStates, mbIdx, mbX, mbY,
+				lumaVals, cbVals, crVals,
 				mbWidth, mbHeight, reconY, strideY, reconCb, reconCr, strideC)
 			if err != nil {
 				return nil, fmt.Errorf("encode MB (%d,%d): %w", mbX, mbY, err)
@@ -245,148 +260,11 @@ func (e *FrameEncoder) encodeSliceCABAC(idrPicID uint32) ([]byte, error) {
 	sliceRBSP = append(sliceRBSP, cabacBytes...)
 
 	var buf bytes.Buffer
-	err := WriteNALU(&buf, 5, 3, sliceRBSP)
-	if err != nil {
+	if err := WriteNALU(&buf, 5, 3, sliceRBSP); err != nil {
 		return nil, fmt.Errorf("write IDR: %w", err)
 	}
 
 	return buf.Bytes(), nil
-}
-
-func (e *FrameEncoder) encodeMBCABAC(enc *cabac.Encoder, ctx []cabac.CtxState,
-	mbStates []encMBState, mbIdx, mbX, mbY int, c yuv.Color,
-	mbWidth, mbHeight int,
-	reconY []uint8, strideY int, reconCb, reconCr []uint8, strideC int) error {
-
-	qp := e.QP
-	qpc := ChromaQP(qp)
-
-	// Select best luma prediction mode
-	lumaMode, lumaPred := selectLumaMode(reconY, strideY, mbX, mbY, c.Y)
-	lumaResidual := int32(c.Y) - int32(lumaPred)
-
-	dc4x4 := ForwardTransformDC4x4(lumaResidual)
-	var dcMatrix [16]int32
-	for i := range dcMatrix {
-		dcMatrix[i] = dc4x4
-	}
-	hadamardResult := ForwardHadamard4x4(dcMatrix)
-	quantDC := QuantizeDC4x4(hadamardResult, qp, 16)
-
-	lumaCBP := 0
-	chromaCBP := 0
-
-	// Select best chroma prediction mode
-	chromaMode, cbPreds, crPreds := selectChromaMode(reconCb, reconCr, strideC, mbX, mbY, c.Cb, c.Cr)
-
-	var cbDCMatrix [4]int32
-	var crDCMatrix [4]int32
-	for i := range 4 {
-		cbDCMatrix[i] = ForwardTransformDC4x4(int32(c.Cb) - int32(cbPreds[i]))
-		crDCMatrix[i] = ForwardTransformDC4x4(int32(c.Cr) - int32(crPreds[i]))
-	}
-	cbHadamard := ForwardHadamard2x2(cbDCMatrix)
-	crHadamard := ForwardHadamard2x2(crDCMatrix)
-	quantCbDC := QuantizeChromaDC2x2(cbHadamard, qpc)
-	quantCrDC := QuantizeChromaDC2x2(crHadamard, qpc)
-
-	hasChromaDC := false
-	for i := range 4 {
-		if quantCbDC[i] != 0 || quantCrDC[i] != 0 {
-			hasChromaDC = true
-			break
-		}
-	}
-	if hasChromaDC {
-		chromaCBP = 1
-	}
-
-	mbType := 1 + lumaMode + 4*chromaCBP + 12*lumaCBP
-
-	// --- CABAC encoding of syntax elements ---
-
-	// Neighbor availability
-	var leftState, topState *encMBState
-	if mbX > 0 {
-		leftState = &mbStates[mbIdx-1]
-	}
-	if mbY > 0 {
-		topState = &mbStates[mbIdx-mbWidth]
-	}
-
-	// mb_type: all neighbors are I_16x16 (not I_NxN), so leftNotINxN=true if available
-	leftNotINxN := leftState != nil // all our MBs are I_16x16, which is not I_NxN
-	topNotINxN := topState != nil
-	encodeMBTypeI16x16(enc, ctx, mbType, leftNotINxN, topNotINxN)
-
-	// intra_chroma_pred_mode
-	leftChromaNZ := leftState != nil && leftState.intraChromaPredMode != 0
-	topChromaNZ := topState != nil && topState.intraChromaPredMode != 0
-	encodeChromaPredMode(enc, ctx, chromaMode, leftChromaNZ, topChromaNZ)
-
-	// mb_qp_delta = 0
-	encodeQPDelta(enc, ctx, 0, false)
-
-	// Residual: Intra16x16DCLevel
-	dcCBFCtx := deriveDCCBFCtx(leftState, topState)
-	var dcCoeffs [16]int32
-	copy(dcCoeffs[:], quantDC[:])
-	dcCBF := encodeResidualBlockCABAC(enc, ctx, encCtxBlockCatIntra16x16DC, dcCBFCtx, dcCoeffs[:], 16)
-
-	// Store coded_block_flag for DC
-	mbStates[mbIdx].codedBlockFlag[encCtxBlockCatIntra16x16DC][0] = dcCBF
-
-	// Intra16x16ACLevel: all zero for flat blocks, but we still write CBF if lumaCBP != 0
-	// For our flat blocks lumaCBP is always 0, so no AC blocks to encode.
-	// Set all AC CBF to 0 for neighbor tracking.
-	for blk := range 16 {
-		mbStates[mbIdx].codedBlockFlag[encCtxBlockCatIntra16x16AC][blk] = 0
-	}
-
-	// Chroma DC
-	if chromaCBP > 0 {
-		// Cb DC
-		cbCBFCtx := deriveChromaDCCBFCtx(leftState, topState, 0)
-		cbCBF := encodeResidualBlockCABAC(enc, ctx, encCtxBlockCatChromaDC, cbCBFCtx, quantCbDC[:], 4)
-		mbStates[mbIdx].codedBlockFlag[encCtxBlockCatChromaDC][0] = cbCBF
-
-		// Cr DC
-		crCBFCtx := deriveChromaDCCBFCtx(leftState, topState, 1)
-		crCBF := encodeResidualBlockCABAC(enc, ctx, encCtxBlockCatChromaDC, crCBFCtx, quantCrDC[:], 4)
-		mbStates[mbIdx].codedBlockFlag[encCtxBlockCatChromaDC][1] = crCBF
-	}
-
-	// Chroma AC: all zero for flat blocks (chromaCBP == 1 means DC only)
-
-	// Update MB state
-	mbStates[mbIdx].mbType = mbType
-	mbStates[mbIdx].intraChromaPredMode = chromaMode
-	mbStates[mbIdx].cbpChroma = chromaCBP
-
-	// Update reconstructed pixels
-	reconLumaVal := reconstructLumaValue(quantDC, lumaPred, qp)
-	for y := range 16 {
-		off := (mbY*16+y)*strideY + mbX*16
-		for x := range 16 {
-			reconY[off+x] = reconLumaVal
-		}
-	}
-	reconCbVals := reconstructChromaValues4x4(quantCbDC, cbPreds, qpc)
-	reconCrVals := reconstructChromaValues4x4(quantCrDC, crPreds, qpc)
-	for blk := range 4 {
-		x0 := (blk % 2) * 4
-		y0 := (blk / 2) * 4
-		for y := range 4 {
-			offCb := (mbY*8+y0+y)*strideC + mbX*8 + x0
-			offCr := offCb
-			for x := range 4 {
-				reconCb[offCb+x] = reconCbVals[blk]
-				reconCr[offCr+x] = reconCrVals[blk]
-			}
-		}
-	}
-
-	return nil
 }
 
 // deriveDCCBFCtx derives the coded_block_flag context for Intra16x16DC.
@@ -415,139 +293,6 @@ func deriveChromaDCCBFCtx(left, top *encMBState, iCbCr int) int {
 		condB = int(top.codedBlockFlag[encCtxBlockCatChromaDC][iCbCr])
 	}
 	return condA + 2*condB
-}
-
-func (e *FrameEncoder) encodeMB(w *BitWriter, mbX, mbY int, c yuv.Color,
-	mbWidth, mbHeight int,
-	nCLuma [][]int, nCCb, nCCr [][]int,
-	reconY []uint8, strideY int, reconCb, reconCr []uint8, strideC int) error {
-
-	qp := e.QP
-	qpc := ChromaQP(qp)
-
-	// Select best luma prediction mode
-	lumaMode, lumaPred := selectLumaMode(reconY, strideY, mbX, mbY, c.Y)
-	lumaResidual := int32(c.Y) - int32(lumaPred)
-
-	// For I_16x16: each 4x4 block has DC = 4*residual (forward DCT of constant)
-	dc4x4 := ForwardTransformDC4x4(lumaResidual)
-
-	// Forward Hadamard on the 16 identical DC values
-	var dcMatrix [16]int32
-	for i := range dcMatrix {
-		dcMatrix[i] = dc4x4
-	}
-	hadamardResult := ForwardHadamard4x4(dcMatrix)
-
-	// Forward quantize DC
-	quantDC := QuantizeDC4x4(hadamardResult, qp, 16)
-
-	// Check if any AC coefficients are non-zero (for flat blocks, they are all zero)
-	// and compute CBP
-	lumaCBP := 0   // 0 = no AC coefficients
-	chromaCBP := 0 // 0 = no chroma residual
-
-	// Select best chroma prediction mode
-	chromaMode, cbPreds, crPreds := selectChromaMode(reconCb, reconCr, strideC, mbX, mbY, c.Cb, c.Cr)
-
-	// Chroma DC: each 4x4 sub-block has its own residual
-	var cbDCMatrix [4]int32
-	var crDCMatrix [4]int32
-	for i := range 4 {
-		cbDCMatrix[i] = ForwardTransformDC4x4(int32(c.Cb) - int32(cbPreds[i]))
-		crDCMatrix[i] = ForwardTransformDC4x4(int32(c.Cr) - int32(crPreds[i]))
-	}
-	cbHadamard := ForwardHadamard2x2(cbDCMatrix)
-	crHadamard := ForwardHadamard2x2(crDCMatrix)
-
-	quantCbDC := QuantizeChromaDC2x2(cbHadamard, qpc)
-	quantCrDC := QuantizeChromaDC2x2(crHadamard, qpc)
-
-	// Check if any chroma DC is non-zero
-	hasChromaDC := false
-	for i := range 4 {
-		if quantCbDC[i] != 0 || quantCrDC[i] != 0 {
-			hasChromaDC = true
-			break
-		}
-	}
-	if hasChromaDC {
-		chromaCBP = 1 // DC only
-	}
-
-	// Determine I_16x16 mb_type
-	// mb_type = 1 + pred_mode + 4*cbp_chroma + 12*cbp_luma_flag
-	mbType := 1 + lumaMode + 4*chromaCBP + 12*lumaCBP
-
-	// Write mb_type as ue(v) — Table 7-11: mb_type IS the ue(v) code value
-	w.WriteUE(uint32(mbType))
-
-	// intra_chroma_pred_mode
-	w.WriteUE(uint32(chromaMode))
-
-	// mb_qp_delta = 0
-	w.WriteSE(0)
-
-	// Intra16x16DCLevel: always present for I_16x16
-	// Write the 16 DC coefficients
-	var dcCoeffs [16]int32
-	copy(dcCoeffs[:], quantDC[:])
-	nCDC := computeNC4x4(nCLuma, mbX*4, mbY*4)
-	EncodeResidualBlock(w, dcCoeffs[:], nCDC, 16)
-
-	// For flat blocks, all AC coefficients are zero.
-	// If lumaCBP == 0, we don't write AC blocks.
-	// Even when lumaCBP == 0, we still need to update nC for neighbor tracking.
-	for blk := range 16 {
-		bx := inverseRasterX4x4[blk]
-		by := inverseRasterY4x4[blk]
-		nCLuma[mbY*4+by/4][mbX*4+bx/4] = 0
-	}
-
-	// Chroma
-	if chromaCBP > 0 {
-		// Chroma DC blocks
-		EncodeResidualBlock(w, quantCbDC[:], -1, 4)
-		EncodeResidualBlock(w, quantCrDC[:], -1, 4)
-
-		// Chroma AC blocks (all zero for flat blocks)
-		// chromaCBP == 1 means DC only, no AC
-	}
-
-	// Update chroma nC (all zero for flat blocks)
-	for blk := range 4 {
-		bx := (blk % 2)
-		by := (blk / 2)
-		nCCb[mbY*2+by][mbX*2+bx] = 0
-		nCCr[mbY*2+by][mbX*2+bx] = 0
-	}
-
-	// Update reconstructed pixels
-	// Need to do inverse quant + inverse transform to get actual reconstructed values
-	reconLumaVal := reconstructLumaValue(quantDC, lumaPred, qp)
-	for y := range 16 {
-		off := (mbY*16+y)*strideY + mbX*16
-		for x := range 16 {
-			reconY[off+x] = reconLumaVal
-		}
-	}
-
-	reconCbVals := reconstructChromaValues4x4(quantCbDC, cbPreds, qpc)
-	reconCrVals := reconstructChromaValues4x4(quantCrDC, crPreds, qpc)
-	for blk := range 4 {
-		x0 := (blk % 2) * 4
-		y0 := (blk / 2) * 4
-		for y := range 4 {
-			offCb := (mbY*8+y0+y)*strideC + mbX*8 + x0
-			offCr := offCb
-			for x := range 4 {
-				reconCb[offCb+x] = reconCbVals[blk]
-				reconCr[offCr+x] = reconCrVals[blk]
-			}
-		}
-	}
-
-	return nil
 }
 
 func computeLumaDCPred(reconY []uint8, strideY, mbX, mbY int) uint8 {
@@ -583,96 +328,70 @@ func computeLumaDCPred(reconY []uint8, strideY, mbX, mbY int) uint8 {
 	return uint8((sum + 8) >> 4)
 }
 
-// computeLumaVerticalPred returns the prediction value for Vertical mode (mode 0).
-// For flat blocks, all top neighbor pixels are identical, so we sample one.
-func computeLumaVerticalPred(reconY []uint8, strideY, mbX, mbY int) uint8 {
-	return reconY[(mbY*16-1)*strideY+mbX*16]
-}
-
-// computeLumaHorizontalPred returns the prediction value for Horizontal mode (mode 1).
-// For flat blocks, all left neighbor pixels are identical, so we sample one.
-func computeLumaHorizontalPred(reconY []uint8, strideY, mbX, mbY int) uint8 {
-	return reconY[mbY*16*strideY+mbX*16-1]
-}
-
-// selectLumaMode picks the best I_16x16 luma prediction mode (0=Vert, 1=Horiz, 2=DC)
-// for a flat block with target value targetY.
-func selectLumaMode(reconY []uint8, strideY, mbX, mbY int, targetY uint8) (mode int, pred uint8) {
-	bestMode := 2
-	bestPred := computeLumaDCPred(reconY, strideY, mbX, mbY)
-	bestErr := absInt(int(targetY) - int(bestPred))
-
-	if mbY > 0 {
-		vPred := computeLumaVerticalPred(reconY, strideY, mbX, mbY)
-		vErr := absInt(int(targetY) - int(vPred))
-		if vErr < bestErr {
-			bestMode, bestPred, bestErr = 0, vPred, vErr
+// lumaPredict16x16 computes the per-pixel I_16x16 prediction array for the given mode.
+// This matches the decoder's prediction: V mode uses the full top row, H mode uses
+// the full left column, DC mode uses a uniform value.
+func lumaPredict16x16(reconY []uint8, strideY, mbX, mbY, mode int) [256]uint8 {
+	var pred [256]uint8
+	switch mode {
+	case 0: // Vertical — each column gets top row pixel
+		off := (mbY*16-1)*strideY + mbX*16
+		for x := range 16 {
+			topVal := reconY[off+x]
+			for y := range 16 {
+				pred[y*16+x] = topVal
+			}
+		}
+	case 1: // Horizontal — each row gets left column pixel
+		for y := range 16 {
+			leftVal := reconY[(mbY*16+y)*strideY+mbX*16-1]
+			for x := range 16 {
+				pred[y*16+x] = leftVal
+			}
+		}
+	case 2: // DC — uniform value
+		dcVal := computeLumaDCPred(reconY, strideY, mbX, mbY)
+		for i := range pred {
+			pred[i] = dcVal
 		}
 	}
+	return pred
+}
 
-	if mbX > 0 {
-		hPred := computeLumaHorizontalPred(reconY, strideY, mbX, mbY)
-		hErr := absInt(int(targetY) - int(hPred))
-		if hErr < bestErr {
-			bestMode, bestPred, _ = 1, hPred, hErr
+// chromaPredict8x8 computes the per-pixel chroma prediction array for the given mode.
+// This matches the decoder's chroma prediction: DC gives per-sub-block averages,
+// V copies the top row, H copies the left column.
+func chromaPredict8x8(recon []uint8, strideC, mbX, mbY, mode int) [64]uint8 {
+	var pred [64]uint8
+	switch mode {
+	case 0: // DC — per-sub-block DC prediction
+		dcPreds := computeChromaDCPreds4x4(recon, strideC, mbX, mbY)
+		for blk := range 4 {
+			x0 := (blk % 2) * 4
+			y0 := (blk / 2) * 4
+			for y := range 4 {
+				for x := range 4 {
+					pred[(y0+y)*8+x0+x] = dcPreds[blk]
+				}
+			}
+		}
+	case 1: // Horizontal — each row gets left column pixel
+		for y := range 8 {
+			leftVal := recon[(mbY*8+y)*strideC+mbX*8-1]
+			for x := range 8 {
+				pred[y*8+x] = leftVal
+			}
+		}
+	case 2: // Vertical — each column gets top row pixel
+		off := (mbY*8-1)*strideC + mbX*8
+		for x := range 8 {
+			topVal := recon[off+x]
+			for y := range 8 {
+				pred[y*8+x] = topVal
+			}
 		}
 	}
-
-	return bestMode, bestPred
-}
-
-// computeChromaVerticalPreds4x4 returns uniform vertical predictions for each 4x4 sub-block.
-// For flat blocks, all top neighbor pixels within each 4x4 column are identical.
-func computeChromaVerticalPreds4x4(recon []uint8, strideC, mbX, mbY int) [4]uint8 {
-	val := recon[(mbY*8-1)*strideC+mbX*8]
-	return [4]uint8{val, val, val, val}
-}
-
-// computeChromaHorizontalPreds4x4 returns uniform horizontal predictions for each 4x4 sub-block.
-// For flat blocks, all left neighbor pixels within each 4x4 row are identical.
-func computeChromaHorizontalPreds4x4(recon []uint8, strideC, mbX, mbY int) [4]uint8 {
-	val := recon[mbY*8*strideC+mbX*8-1]
-	return [4]uint8{val, val, val, val}
-}
-
-// selectChromaMode picks the best chroma prediction mode (0=DC, 1=Horiz, 2=Vert)
-// for flat blocks with target values targetCb, targetCr.
-func selectChromaMode(reconCb, reconCr []uint8, strideC, mbX, mbY int,
-	targetCb, targetCr uint8) (mode int, cbPreds, crPreds [4]uint8) {
-
-	bestMode := 0
-	bestCbPreds := computeChromaDCPreds4x4(reconCb, strideC, mbX, mbY)
-	bestCrPreds := computeChromaDCPreds4x4(reconCr, strideC, mbX, mbY)
-	bestErr := chromaPredError(targetCb, targetCr, bestCbPreds, bestCrPreds)
-
-	if mbY > 0 {
-		vCb := computeChromaVerticalPreds4x4(reconCb, strideC, mbX, mbY)
-		vCr := computeChromaVerticalPreds4x4(reconCr, strideC, mbX, mbY)
-		vErr := chromaPredError(targetCb, targetCr, vCb, vCr)
-		if vErr < bestErr {
-			bestMode, bestCbPreds, bestCrPreds, bestErr = 2, vCb, vCr, vErr
-		}
-	}
-
-	if mbX > 0 {
-		hCb := computeChromaHorizontalPreds4x4(reconCb, strideC, mbX, mbY)
-		hCr := computeChromaHorizontalPreds4x4(reconCr, strideC, mbX, mbY)
-		hErr := chromaPredError(targetCb, targetCr, hCb, hCr)
-		if hErr < bestErr {
-			bestMode, bestCbPreds, bestCrPreds, _ = 1, hCb, hCr, hErr
-		}
-	}
-
-	return bestMode, bestCbPreds, bestCrPreds
-}
-
-// chromaPredError computes total absolute error across all 4 sub-blocks for both Cb and Cr.
-func chromaPredError(targetCb, targetCr uint8, cbPreds, crPreds [4]uint8) int {
-	total := 0
-	for i := range 4 {
-		total += absInt(int(targetCb)-int(cbPreds[i])) + absInt(int(targetCr)-int(crPreds[i]))
-	}
-	return total
+	return pred
 }
 
 func absInt(v int) int {
@@ -783,40 +502,6 @@ func computeNC4x4(nCLuma [][]int, blkX, blkY int) int {
 		return nB
 	}
 	return 0
-}
-
-// reconstructLumaValue computes the actual reconstructed luma value for a flat MB.
-// This must match what the decoder produces.
-func reconstructLumaValue(quantDC [16]int32, predDC uint8, qp int) uint8 {
-	// Inverse: dequant DC, inverse Hadamard, inverse transform
-	// For flat blocks: only DC[0] matters (all AC = 0)
-	dequantMatrix := dequantDC4x4(quantDC, qp, 16)
-	invHadamard := inverseHadamard4x4(dequantMatrix)
-
-	// The inverse transform of [DC, 0, 0, ...] just gives DC >> 6 per sample
-	// but with rounding: (DC + 32) >> 6
-	// Actually for I_16x16 the DC is passed through without the regular dequant
-	dcVal := invHadamard[0] // This is in raster order position (0,0)
-
-	// Inverse 4x4 transform of [dcVal, 0, 0, ...]: result = (dcVal + 32) >> 6
-	residual := (dcVal + 32) >> 6
-	val := int32(predDC) + residual
-	return clipU8(int(val))
-}
-
-// reconstructChromaValues4x4 reconstructs chroma values for each 4x4 sub-block.
-// Must match the decoder order: inverse Hadamard FIRST, then dequant.
-func reconstructChromaValues4x4(quantDC [4]int32, preds [4]uint8, qpc int) [4]uint8 {
-	invHadamard := inverseHadamard2x2(quantDC)
-	dcScaled := dequantChromaDC2x2(invHadamard, qpc, 16)
-
-	var result [4]uint8
-	for i := range 4 {
-		residual := (dcScaled[i] + 32) >> 6
-		val := int32(preds[i]) + residual
-		result[i] = clipU8(int(val))
-	}
-	return result
 }
 
 func clipU8(v int) uint8 {

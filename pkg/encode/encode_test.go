@@ -486,6 +486,253 @@ func TestSPSMaxRefFrames(t *testing.T) {
 	}
 }
 
+// TestPlaneGridEquivalence verifies that encoding via Plane produces identical
+// bitstreams to encoding via Grid+Colors.
+func TestPlaneGridEquivalence(t *testing.T) {
+	for _, cabac := range []bool{false, true} {
+		name := "CAVLC"
+		if cabac {
+			name = "CABAC"
+		}
+		t.Run(name, func(t *testing.T) {
+			grid, err := yuv.ParseGrid("xy,yx")
+			if err != nil {
+				t.Fatal(err)
+			}
+			colors := yuv.ColorMap{
+				'x': {Y: 200, Cb: 100, Cr: 150},
+				'y': {Y: 50, Cb: 200, Cr: 80},
+			}
+
+			// Method 1: Grid+Colors
+			enc1 := &FrameEncoder{Grid: grid, Colors: colors, QP: 20, DisableDeblock: 1, CABAC: cabac}
+			bs1, err := enc1.Encode()
+			if err != nil {
+				t.Fatalf("Grid encode: %v", err)
+			}
+
+			// Method 2: PlaneGrid
+			pg, err := yuv.GridToPlaneGrid(grid, colors)
+			if err != nil {
+				t.Fatal(err)
+			}
+			enc2 := &FrameEncoder{Plane: pg, QP: 20, DisableDeblock: 1, CABAC: cabac}
+			bs2, err := enc2.Encode()
+			if err != nil {
+				t.Fatalf("Plane encode: %v", err)
+			}
+
+			if !bytes.Equal(bs1, bs2) {
+				t.Errorf("bitstreams differ (Grid: %d bytes, Plane: %d bytes)", len(bs1), len(bs2))
+			}
+		})
+	}
+}
+
+// TestPlaneGrid8x8Uniform verifies that a BlockSize=8 PlaneGrid with uniform color
+// produces zero AC coefficients and decodes correctly.
+func TestPlaneGrid8x8Uniform(t *testing.T) {
+	for _, cabac := range []bool{false, true} {
+		name := "CAVLC"
+		if cabac {
+			name = "CABAC"
+		}
+		t.Run(name, func(t *testing.T) {
+			pg := yuv.NewPlaneGrid(4, 4, 8) // 2x2 MBs, 32x32 pixels
+			for y := range 4 {
+				for x := range 4 {
+					pg.Y[y][x] = 128
+					pg.Cb[y][x] = 128
+					pg.Cr[y][x] = 128
+				}
+			}
+
+			enc := &FrameEncoder{Plane: pg, QP: 26, DisableDeblock: 1, CABAC: cabac}
+			bs, err := enc.Encode()
+			if err != nil {
+				t.Fatalf("Encode: %v", err)
+			}
+
+			nalus := avc.ExtractNalusFromByteStream(bs)
+			dec := decoder.New()
+			dec.SkipDeblock = true
+			f, err := dec.DecodeNALUs(nalus)
+			if err != nil {
+				t.Fatalf("Decode: %v", err)
+			}
+
+			if f.Width != 32 || f.Height != 32 {
+				t.Errorf("frame size %dx%d, want 32x32", f.Width, f.Height)
+			}
+
+			for y := range f.Height {
+				for x := range f.Width {
+					got := f.GetLumaPixel(x, y)
+					if got != 128 {
+						t.Errorf("luma(%d,%d) = %d, want 128", x, y, got)
+						return
+					}
+				}
+			}
+		})
+	}
+}
+
+// TestPlaneGrid8x8Varying verifies that a BlockSize=8 PlaneGrid with varying colors
+// encodes and decodes with AC residuals.
+func TestPlaneGrid8x8Varying(t *testing.T) {
+	for _, cabac := range []bool{false, true} {
+		name := "CAVLC"
+		if cabac {
+			name = "CABAC"
+		}
+		t.Run(name, func(t *testing.T) {
+			pg := yuv.NewPlaneGrid(2, 2, 8) // 1x1 MB, 16x16 pixels
+			// Four quadrants with different luma values
+			pg.Y[0][0] = 100 // TL
+			pg.Y[0][1] = 200 // TR
+			pg.Y[1][0] = 50  // BL
+			pg.Y[1][1] = 150 // BR
+
+			for y := range 2 {
+				for x := range 2 {
+					pg.Cb[y][x] = 128
+					pg.Cr[y][x] = 128
+				}
+			}
+
+			enc := &FrameEncoder{Plane: pg, QP: 10, DisableDeblock: 1, CABAC: cabac}
+			bs, err := enc.Encode()
+			if err != nil {
+				t.Fatalf("Encode: %v", err)
+			}
+
+			nalus := avc.ExtractNalusFromByteStream(bs)
+			dec := decoder.New()
+			dec.SkipDeblock = true
+			f, err := dec.DecodeNALUs(nalus)
+			if err != nil {
+				t.Fatalf("Decode: %v", err)
+			}
+
+			if f.Width != 16 || f.Height != 16 {
+				t.Errorf("frame size %dx%d, want 16x16", f.Width, f.Height)
+			}
+
+			// Build expected frame from PlaneGrid
+			expected := yuv.BuildFrameFromPlaneGrid(pg)
+
+			// With low QP, decoded pixels should be very close to expected
+			mismatch := 0
+			for y := range f.Height {
+				for x := range f.Width {
+					got := f.GetLumaPixel(x, y)
+					want := expected.GetLumaPixel(x, y)
+					diff := int(got) - int(want)
+					if diff < 0 {
+						diff = -diff
+					}
+					if diff > 3 {
+						if mismatch < 5 {
+							t.Errorf("luma(%d,%d) = %d, want %d (diff=%d)", x, y, got, want, diff)
+						}
+						mismatch++
+					}
+				}
+			}
+			if mismatch > 0 {
+				t.Errorf("total luma mismatches (>3): %d of %d", mismatch, f.Width*f.Height)
+			}
+		})
+	}
+}
+
+// TestGenerateIDRFromPlane verifies the high-level PlaneGrid IDR API.
+func TestGenerateIDRFromPlane(t *testing.T) {
+	for _, cabac := range []bool{false, true} {
+		name := "CAVLC"
+		if cabac {
+			name = "CABAC"
+		}
+		t.Run(name, func(t *testing.T) {
+			pg := yuv.NewPlaneGrid(2, 1, 16) // 32×16
+			pg.Y[0][0] = 235
+			pg.Y[0][1] = 16
+			for x := range 2 {
+				pg.Cb[0][x] = 128
+				pg.Cr[0][x] = 128
+			}
+
+			p := EncodeParams{Width: 32, Height: 16, QP: 26, CABAC: cabac}
+			spsData, _ := GenerateSPS(p)
+			ppsData, _ := GeneratePPS(p)
+			idr, err := GenerateIDRFromPlane(p, pg, 0)
+			if err != nil {
+				t.Fatalf("GenerateIDRFromPlane: %v", err)
+			}
+
+			var buf bytes.Buffer
+			buf.Write(spsData)
+			buf.Write(ppsData)
+			buf.Write(idr)
+
+			nalus := avc.ExtractNalusFromByteStream(buf.Bytes())
+			dec := decoder.New()
+			dec.SkipDeblock = true
+			f, err := dec.DecodeNALUs(nalus)
+			if err != nil {
+				t.Fatalf("Decode: %v", err)
+			}
+			if f.Width != 32 || f.Height != 16 {
+				t.Errorf("frame size %dx%d, want 32x16", f.Width, f.Height)
+			}
+		})
+	}
+}
+
+func TestFindBlock4x4(t *testing.T) {
+	// The rasterScan4x4 table maps (row*4+col) to block index.
+	// Verify all 16 positions round-trip through the scan order.
+	for blk := range 16 {
+		bx := inverseRasterX4x4[blk] / 4
+		by := inverseRasterY4x4[blk] / 4
+		got := findBlock4x4(bx, by)
+		if got != blk {
+			t.Errorf("findBlock4x4(%d,%d) = %d, want %d", bx, by, got, blk)
+		}
+	}
+}
+
+func TestRasterACToZigzag(t *testing.T) {
+	// Input: sequential values 1-15 in raster AC order
+	var rasterAC [15]int32
+	for i := range 15 {
+		rasterAC[i] = int32(i + 1)
+	}
+	zz := rasterACToZigzag(rasterAC)
+	// Verify by checking a few known positions from zigzag4x4AC:
+	// zigzag4x4AC[0] = 1 → rasterAC[0] = 1
+	if zz[0] != 1 {
+		t.Errorf("zz[0] = %d, want 1", zz[0])
+	}
+	// zigzag4x4AC[1] = 4 → rasterAC[3] = 4
+	if zz[1] != 4 {
+		t.Errorf("zz[1] = %d, want 4", zz[1])
+	}
+	// zigzag4x4AC[2] = 8 → rasterAC[7] = 8
+	if zz[2] != 8 {
+		t.Errorf("zz[2] = %d, want 8", zz[2])
+	}
+	// All values should be present (it's a permutation)
+	sum := int32(0)
+	for _, v := range zz {
+		sum += v
+	}
+	if sum != 120 { // sum(1..15) = 120
+		t.Errorf("sum = %d, want 120", sum)
+	}
+}
+
 // TestEncodeRefactorEquivalence verifies that EncodeSPSPPS + EncodeSlice(0)
 // produces identical output to the original Encode() method.
 func TestEncodeRefactorEquivalence(t *testing.T) {

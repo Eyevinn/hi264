@@ -10,13 +10,15 @@
 ## Pure Go H.264/AVC IDR Decoder & Bitstream Generator
 A pure Go H.264/AVC decoder for IDR (and P_Skip) frames with both CABAC and CAVLC
 entropy coding, plus a bitstream generator for producing valid H.264 test
-content with IDR and empty P-frames from flat-color 16x16 macroblock patterns.
-It can also be used to extend video with extra frames without a change of SPS/PPS.
+content with IDR and empty P-frames from grid patterns at 16x16 or 8x8 block
+granularity. It can also be used to extend video with extra frames without a
+change of SPS/PPS.
 
 This is **not** a general-purpose video encoder — it does not accept arbitrary
 pixel input or perform motion estimation. The encoder produces I_16x16 DC
-prediction frames where each macroblock is a single flat color, defined by a
-grid pattern. This is useful for generating test bitstreams, color bars, frame
+prediction frames from grid patterns (one color per block), with proper AC
+residual encoding when 8x8 blocks create step patterns at 4x4 sub-block
+boundaries. This is useful for generating test bitstreams, color bars, frame
 counters, and reference content for decoder verification.
 
 All processing is currently 8-bit 4:2:0 only (no 10-bit or 4:2:2/4:4:4 support).
@@ -64,9 +66,10 @@ go run ./cmd/hi264dec -idr-and-skip -n 10 input.264 frames.png
 ### hi264gen — H.264 bitstream generator for test content
 
 Generates valid H.264 bitstreams from grid-based patterns. Each character in a
-grid maps to one 16x16 macroblock filled with a single flat color, encoded as
-I_16x16 with DC prediction. This is not a general-purpose encoder — it produces
-test content from color patterns, not from arbitrary video frames.
+grid maps to one block (16x16 by default, or 8x8 with `@8x8` directive) filled
+with a single flat color, encoded as I_16x16 with DC prediction. This is not a
+general-purpose encoder — it produces test content from color patterns, not from
+arbitrary video frames.
 
 Output format is auto-detected from the file extension, or set explicitly with `-f`:
 
@@ -168,6 +171,9 @@ Flags:
 | `-text` | Text overlay pattern (e.g. `"%03d"`, `"%mm:%ss.%ff"`, `\n` for newlines) | — |
 | `-text-scale` | Text scale factor (0 = auto-fit) | 0 |
 | `-text-bg` | Text background box color (R,G,B) | none |
+
+Text supports **A-Z 0-9** and punctuation **! # % + - . / : = ? [ ] _ ( )** plus space.
+Lowercase input is auto-uppercased.
 | `-fg` | Foreground color (R,G,B) | — |
 | `-bg` | Background color (R,G,B) | — |
 | `-qp` | Quantization parameter | 26 |
@@ -237,8 +243,11 @@ BBBBBYYBBBBBBBBB
 BBBBBYYBBBBBBBBB
 ```
 
-Each character in the grid maps to one 16x16 macroblock. Supported directives:
-`@rgb` (treat values as RGB), `@bt601`/`@bt709`/`@bt2020` (color space for
+Each character in the grid maps to one block. By default each character is a
+16x16 macroblock; with the `@8x8` directive, each character maps to an 8x8
+block (4 characters per macroblock, enabling finer spatial detail with proper
+AC residual encoding). Supported directives: `@rgb` (treat values as RGB),
+`@8x8` (8x8 block granularity), `@bt601`/`@bt709`/`@bt2020` (color space for
 RGB-to-YCbCr conversion). See `examples/` for complete examples.
 
 ## Example Patterns
@@ -297,11 +306,15 @@ frame, err = dec.DecodeAVC(sampleData)
 // Decode multi-frame stream (IDR + P_Skip)
 frames, err := dec.DecodeAllAnnexB(data)
 
-// Generate H.264 test bitstream (flat-color I_16x16 macroblocks from grid pattern)
+// Generate H.264 test bitstream from grid pattern
 p := encode.EncodeParams{Width: 320, Height: 240, QP: 26}
 sps, _ := encode.GenerateSPS(p)
 pps, _ := encode.GeneratePPS(p)
 idr, _ := encode.GenerateIDR(p, grid, colors, 0)
+
+// Generate from PlaneGrid (supports 8x8 block granularity)
+plane, _ := yuv.GridToPlaneGridBS(grid, colors, 8)
+idr, _ = encode.GenerateIDRFromPlane(p, plane, 0)
 ```
 
 > **Performance tip:** When writing encoded slices to a file, wrap the
@@ -372,7 +385,7 @@ stream = append(stream, pSkipSlice...)
 pkg/decoder/       — Public: top-level decoder API (DecodeAnnexB, DecodeAVC, etc.)
 pkg/encode/        — Public: bitstream generator API (flat-color I_16x16 IDR + P_Skip)
 pkg/frame/         — Public: Frame type (decoded output)
-pkg/yuv/           — Public: Grid, ColorMap, Color (encode input), YUV/Y4M/PNG output
+pkg/yuv/           — Public: Grid, ColorMap, PlaneGrid (encode input), YUV/Y4M/PNG output
 internal/cabac/    — Internal: CABAC arithmetic decoder and encoder engines
 internal/cavlc/    — Internal: CAVLC bitstream reader, VLC tables, residual decoder
 internal/context/  — Internal: Context model initialization (1024 contexts)
