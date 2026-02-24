@@ -150,41 +150,26 @@ func SolidGrid(width, height int, c Color) (*Grid, ColorMap) {
 		ColorMap{'.': c}
 }
 
-// BuildFrame creates a frame from a grid and color map, filling each MB with solid color.
-func BuildFrame(grid *Grid, colors ColorMap) (*frame.Frame, error) {
-	width := grid.Width * 16
-	height := grid.Height * 16
-	f := frame.NewFrame(width, height)
-
-	for mbY := 0; mbY < grid.Height; mbY++ {
-		for mbX := 0; mbX < grid.Width; mbX++ {
-			ch := grid.Chars[mbY][mbX]
-			c, ok := colors[ch]
-			if !ok {
-				return nil, fmt.Errorf("no color defined for character %q at (%d,%d)", string(ch), mbX, mbY)
-			}
-
-			// Fill luma 16x16
-			var lumaBlock [16][16]uint8
-			for y := range 16 {
-				for x := range 16 {
-					lumaBlock[y][x] = c.Y
-				}
-			}
-			f.SetLuma16x16(mbX, mbY, lumaBlock)
-
-			// Fill chroma 8x8
-			var cbBlock, crBlock [8][8]uint8
-			for y := range 8 {
-				for x := range 8 {
-					cbBlock[y][x] = c.Cb
-					crBlock[y][x] = c.Cr
-				}
-			}
-			f.SetChroma8x8(0, mbX, mbY, cbBlock)
-			f.SetChroma8x8(1, mbX, mbY, crBlock)
+// UpscaleGrid scales a grid by factor f: each cell becomes f×f cells.
+// The ColorMap is unchanged since the same characters are used.
+func UpscaleGrid(g *Grid, f int) *Grid {
+	newW := g.Width * f
+	newH := g.Height * f
+	chars := make([][]byte, newH)
+	for y := range newH {
+		chars[y] = make([]byte, newW)
+		for x := range newW {
+			chars[y][x] = g.Chars[y/f][x/f]
 		}
 	}
+	return &Grid{Chars: chars, Width: newW, Height: newH}
+}
 
-	return f, nil
+// BuildFrame creates a frame from a grid and color map, filling each MB with solid color.
+func BuildFrame(grid *Grid, colors ColorMap) (*frame.Frame, error) {
+	pg, err := GridToPlaneGrid(grid, colors)
+	if err != nil {
+		return nil, err
+	}
+	return BuildFrameFromPlaneGrid(pg), nil
 }

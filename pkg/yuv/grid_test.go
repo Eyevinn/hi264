@@ -201,6 +201,31 @@ func TestParseImageFileCSGridWithoutSeparator(t *testing.T) {
 	}
 }
 
+func TestParseImageFileFull8x8(t *testing.T) {
+	input := "@rgb\n@8x8\nw=255,255,255\nb=0,0,0\n\nwb\nbw\n"
+	res, err := ParseImageFileFull(strings.NewReader(input), false, BT601, LimitedRange)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if res.BlockSize != 8 {
+		t.Errorf("block size = %d, want 8", res.BlockSize)
+	}
+	if res.Grid.Width != 2 || res.Grid.Height != 2 {
+		t.Errorf("grid %dx%d, want 2x2", res.Grid.Width, res.Grid.Height)
+	}
+
+	pg, err := GridToPlaneGridBS(res.Grid, res.Colors, res.BlockSize)
+	if err != nil {
+		t.Fatalf("GridToPlaneGridBS: %v", err)
+	}
+	if pg.BlockSize != 8 {
+		t.Errorf("PlaneGrid.BlockSize = %d, want 8", pg.BlockSize)
+	}
+	if pg.PixelWidth() != 16 || pg.PixelHeight() != 16 {
+		t.Errorf("pixel size %dx%d, want 16x16", pg.PixelWidth(), pg.PixelHeight())
+	}
+}
+
 func TestParseColorSpecCSInvalidFormat(t *testing.T) {
 	badSpecs := []string{
 		"",          // no = sign (handled by caller)
@@ -214,6 +239,51 @@ func TestParseColorSpecCSInvalidFormat(t *testing.T) {
 		if err == nil {
 			t.Errorf("ParseColorSpecCS(%q) should return error", spec)
 		}
+	}
+}
+
+func TestSolidGrid(t *testing.T) {
+	g, colors := SolidGrid(32, 32, Color{235, 128, 128})
+	if g.Width != 2 || g.Height != 2 {
+		t.Errorf("got %dx%d, want 2x2", g.Width, g.Height)
+	}
+	if colors['.'].Y != 235 || colors['.'].Cb != 128 || colors['.'].Cr != 128 {
+		t.Errorf("color = %v, want {235,128,128}", colors['.'])
+	}
+	for y := range g.Height {
+		for x := range g.Width {
+			if g.Chars[y][x] != '.' {
+				t.Errorf("Chars[%d][%d] = %c, want '.'", y, x, g.Chars[y][x])
+			}
+		}
+	}
+}
+
+func TestSolidGridRoundsUp(t *testing.T) {
+	g, _ := SolidGrid(33, 17, Color{128, 128, 128})
+	if g.Width != 3 || g.Height != 2 {
+		t.Errorf("got %dx%d, want 3x2", g.Width, g.Height)
+	}
+}
+
+func TestUpscaleGrid(t *testing.T) {
+	grid, err := ParseGrid("xy,yx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	scaled := UpscaleGrid(grid, 2)
+	if scaled.Width != 4 || scaled.Height != 4 {
+		t.Errorf("got %dx%d, want 4x4", scaled.Width, scaled.Height)
+	}
+	// Original (0,0)='x' should fill 2x2 block at (0,0)
+	for _, pos := range [][2]int{{0, 0}, {1, 0}, {0, 1}, {1, 1}} {
+		if scaled.Chars[pos[1]][pos[0]] != 'x' {
+			t.Errorf("Chars[%d][%d] = %c, want 'x'", pos[1], pos[0], scaled.Chars[pos[1]][pos[0]])
+		}
+	}
+	// Original (1,0)='y' should fill 2x2 block at (2,0)
+	if scaled.Chars[0][2] != 'y' || scaled.Chars[0][3] != 'y' {
+		t.Error("top-right block should be 'y'")
 	}
 }
 

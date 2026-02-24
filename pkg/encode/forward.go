@@ -169,11 +169,84 @@ func ChromaQP(qpY int) int {
 	return qpcTable[qpY-30]
 }
 
-// ForwardTransformDC4x4 computes the DC coefficient of a 4x4 block
+// ForwardTransformDC4x4Const computes the DC coefficient of a 4x4 block
 // from a constant residual value. For a constant block with value R:
 // DC = 16*R (forward 4x4 DCT: row sum 4R, column sum 4*4R = 16R).
-func ForwardTransformDC4x4(residual int32) int32 {
+func ForwardTransformDC4x4Const(residual int32) int32 {
 	return 16 * residual
+}
+
+// ForwardTransformDC4x4 is an alias for ForwardTransformDC4x4Const for backward compatibility.
+func ForwardTransformDC4x4(residual int32) int32 {
+	return ForwardTransformDC4x4Const(residual)
+}
+
+// ForwardTransform4x4 performs the forward 4x4 integer DCT.
+// Input: 16 residual samples in raster order (row*4+col).
+// Output: 16 transform coefficients in raster order.
+// This is the inverse of InverseTransform4x4 in internal/transform.
+func ForwardTransform4x4(block [16]int32) [16]int32 {
+	var temp [16]int32
+
+	// 1D transform on rows
+	for i := range 4 {
+		s0 := block[i*4+0]
+		s1 := block[i*4+1]
+		s2 := block[i*4+2]
+		s3 := block[i*4+3]
+
+		p0 := s0 + s3
+		p1 := s1 + s2
+		p2 := s1 - s2
+		p3 := s0 - s3
+
+		temp[i*4+0] = p0 + p1
+		temp[i*4+1] = p2 + (p3 << 1)
+		temp[i*4+2] = p0 - p1
+		temp[i*4+3] = p3 - (p2 << 1)
+	}
+
+	// 1D transform on columns
+	var result [16]int32
+	for j := range 4 {
+		s0 := temp[0*4+j]
+		s1 := temp[1*4+j]
+		s2 := temp[2*4+j]
+		s3 := temp[3*4+j]
+
+		p0 := s0 + s3
+		p1 := s1 + s2
+		p2 := s1 - s2
+		p3 := s0 - s3
+
+		result[0*4+j] = p0 + p1
+		result[1*4+j] = p2 + (p3 << 1)
+		result[2*4+j] = p0 - p1
+		result[3*4+j] = p3 - (p2 << 1)
+	}
+
+	return result
+}
+
+// ForwardTransformDC4x4Block computes the full 4x4 DCT coefficients for a block
+// made of at most 4 constant-value quadrants. The block is composed of:
+//
+//	vals[0] vals[1]   (top-left 2x2, top-right 2x2)
+//	vals[2] vals[3]   (bottom-left 2x2, bottom-right 2x2)
+//
+// This avoids building a 16-element pixel array by computing the transform
+// analytically from the 4 quadrant values.
+func ForwardTransformDC4x4Block(vals [4]int32) [16]int32 {
+	// Build the 4x4 residual block from the quadrant values
+	var block [16]int32
+	for r := range 4 {
+		for c := range 4 {
+			qr := r / 2 // 0 for rows 0-1, 1 for rows 2-3
+			qc := c / 2 // 0 for cols 0-1, 1 for cols 2-3
+			block[r*4+c] = vals[qr*2+qc]
+		}
+	}
+	return ForwardTransform4x4(block)
 }
 
 // ForwardDequantRoundTrip verifies that forward quant + dequant of a DC value

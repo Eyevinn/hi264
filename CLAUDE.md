@@ -8,9 +8,10 @@
 
 Pure Go H.264/AVC decoder for IDR and P_Skip frames with CABAC and CAVLC entropy
 coding, plus a bitstream generator that produces valid H.264 test content from
-flat-color 16x16 macroblock grid patterns (I_16x16 DC prediction). Not a
-general-purpose encoder. Supports both CAVLC (Baseline) and CABAC (Main profile),
-with P_Skip frame generation for efficient multi-frame sequences.
+grid patterns (I_16x16 DC prediction). Supports 16x16 macroblock and 8x8 block
+granularity via PlaneGrid (direct Y/Cb/Cr planes, no character indirection).
+Not a general-purpose encoder. Supports both CAVLC (Baseline) and CABAC (Main
+profile), with P_Skip frame generation for efficient multi-frame sequences.
 All processing is 8-bit 4:2:0 only (no 10-bit or 4:2:2/4:4:4 support).
 Pixel-perfect match with FFmpeg across 41 golden decoder test cases and 12+
 encoder verification tests.
@@ -37,7 +38,10 @@ encoder verification tests.
 - Per-sub-block chroma DC prediction (matching decoder's 4x4 sub-block logic)
 - Forward Hadamard transform + quantization (QP 0-51)
 - SPS/PPS generation (Baseline and Main profiles, configurable max_num_ref_frames)
+- PlaneGrid: direct Y/Cb/Cr value planes with 16x16 or 8x8 block granularity
 - Grid-based pattern input with RGB or YCbCr color specification
+- 8x8 block support: per-4x4-block AC residual encoding at quadrant boundaries
+- Forward 4x4 integer DCT (inverse of decoder's InverseTransform4x4)
 - FFmpeg-verified output across diverse test patterns (CAVLC and CABAC)
 - P_Skip slice encoder (CAVLC and CABAC, all-skip MBs copying from reference)
 - P-slice header writer (non-IDR, with ref list and marking syntax, CABAC alignment)
@@ -46,6 +50,7 @@ encoder verification tests.
 - Fragmented MP4 (fMP4/CMAF) output with configurable framerate and fragment duration
 - Tiling background pattern from `.gridimg` files (`-gi` with `-w`/`-h`)
 - Text overlay with format patterns (`-text "%03d"`, `"%mm:%ss.%ff"`, etc.)
+- Text character set: A-Z 0-9 and `! # % + - . / : = ? [ ] _ ( )` (lowercase auto-uppercased)
 - Auto-scaling text (`-text-scale 0`) to fill available frame space
 - Text background box (`-text-bg R,G,B`) for readability over busy patterns
 - Built-in 75% SMPTE color bars pattern (`-smpte`)
@@ -57,13 +62,13 @@ encoder verification tests.
 - Limited-range (Y: 16-235) and full-range (Y: 0-255) YCbCr conversion
 - H.264 SPS VUI parameters signaling (colour_primaries, transfer_characteristics, matrix_coefficients, video_full_range_flag)
 - Decoder extracts VUI color metadata from SPS for correct YCbCr→RGB conversion
-- `.gridimg` directives: `@bt709`, `@bt2020`, `@bt601` for per-file color space
+- `.gridimg` directives: `@bt709`, `@bt2020`, `@bt601` for per-file color space; `@8x8` for 8x8 block granularity
 - Y4M output with XCOLORSPACE/XCOLORRANGE tags
 
 #### Raw Output (hi264gen)
 - Raw YUV/Y4M/PNG/JPEG output from the same grid patterns (no H.264 encoding)
 - Configurable color space for RGB↔YCbCr conversion (BT.601/BT.709/BT.2020)
-- `.gridimg` file format with `@rgb` and `@bt709`/`@bt2020` directives
+- `.gridimg` file format with `@rgb`, `@bt709`/`@bt2020`, and `@8x8` directives
 
 ### Dependencies
 - `github.com/Eyevinn/mp4ff` — SPS/PPS/SliceHeader parsing, NAL extraction, fragmented MP4 creation
@@ -205,7 +210,7 @@ TRACE_MBCMP=1 go run ./cmd/hi264dec input.264 output.yuv
 pkg/decoder/       — Public: top-level decoder API (DecodeAnnexB, DecodeAVC, etc.)
 pkg/encode/        — Public: encoder API (EncodeParams, GenerateSPS/PPS/IDR/PSkip)
 pkg/frame/         — Public: Frame type (decoded output)
-pkg/yuv/           — Public: Grid, ColorMap, Color (encode input), YUV/Y4M/PNG output
+pkg/yuv/           — Public: Grid, ColorMap, PlaneGrid (encode input), YUV/Y4M/PNG output
 internal/cabac/    — Internal: CABAC arithmetic decoder and encoder engines
 internal/cavlc/    — Internal: CAVLC bitstream reader, VLC tables, residual decoder
 internal/context/  — Internal: Context model initialization (1024 contexts)
@@ -240,9 +245,13 @@ frame, err = dec.DecodeAVC(avcData)
 // Decode multi-frame stream
 frames, err := dec.DecodeAllAnnexB(annexBData)
 
-// Generate an IDR frame
+// Generate an IDR frame from Grid+ColorMap
 p := encode.EncodeParams{Width: 320, Height: 240, QP: 26}
 sps, _ := encode.GenerateSPS(p)
 pps, _ := encode.GeneratePPS(p)
 idr, _ := encode.GenerateIDR(p, grid, colors, 0)
+
+// Generate an IDR frame from PlaneGrid (supports 8x8 blocks)
+plane, _ := yuv.GridToPlaneGridBS(grid, colors, 8)
+idr, _ = encode.GenerateIDRFromPlane(p, plane, 0)
 ```

@@ -3,36 +3,36 @@ package yuv
 import "testing"
 
 func TestGlyphPixel(t *testing.T) {
-	// Verify 'h' matches logo: #.. #.. ### #.# #.#
+	// Verify 'H': #.# #.# ### #.# #.#
 	hExpected := [5][3]bool{
-		{true, false, false},
-		{true, false, false},
+		{true, false, true},
+		{true, false, true},
 		{true, true, true},
 		{true, false, true},
 		{true, false, true},
 	}
 	for row := range 5 {
 		for col := range 3 {
-			got := GlyphPixel('h', col, row)
+			got := GlyphPixel('H', col, row)
 			if got != hExpected[row][col] {
-				t.Errorf("GlyphPixel('h', %d, %d) = %v, want %v", col, row, got, hExpected[row][col])
+				t.Errorf("GlyphPixel('H', %d, %d) = %v, want %v", col, row, got, hExpected[row][col])
 			}
 		}
 	}
 
-	// Verify 'i' matches logo: .#. ... .#. .#. .#.
+	// Verify 'I': ###  .#.  .#.  .#.  ###
 	iExpected := [5][3]bool{
-		{false, true, false},
-		{false, false, false},
-		{false, true, false},
+		{true, true, true},
 		{false, true, false},
 		{false, true, false},
+		{false, true, false},
+		{true, true, true},
 	}
 	for row := range 5 {
 		for col := range 3 {
-			got := GlyphPixel('i', col, row)
+			got := GlyphPixel('I', col, row)
 			if got != iExpected[row][col] {
-				t.Errorf("GlyphPixel('i', %d, %d) = %v, want %v", col, row, got, iExpected[row][col])
+				t.Errorf("GlyphPixel('I', %d, %d) = %v, want %v", col, row, got, iExpected[row][col])
 			}
 		}
 	}
@@ -65,7 +65,7 @@ func TestGlyphDigitsMatchExisting(t *testing.T) {
 
 func TestHasGlyph(t *testing.T) {
 	// Supported
-	for _, ch := range []byte("ABCabc012!@# ") {
+	for _, ch := range []byte("ABC012!#?. ") {
 		if !HasGlyph(ch) {
 			t.Errorf("HasGlyph(%q) = false, want true", string(ch))
 		}
@@ -407,8 +407,8 @@ func TestOverlayTextWithBg(t *testing.T) {
 }
 
 func TestLogoReconstruction(t *testing.T) {
-	// The logo is "hi264" at scale 2 on a 48×27 frame with SMPTE bars.
-	// Overlay text should place glyphs at the same positions as the hand-drawn logo.
+	// "HI264" at scale 2 on a 48×27 frame with SMPTE bars.
+	// (Input "hi264" is auto-uppercased to "HI264")
 	mbW, mbH := 48, 27
 	scale := 2
 
@@ -428,7 +428,7 @@ func TestLogoReconstruction(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Text "hi264": TextWidth = 19, scaled = 38
+	// Text "HI264": TextWidth = 19, scaled = 38
 	// Centered: offsetX = (48-38)/2 = 5, offsetY = (27-10)/2 = 8
 	// Box: (4,7) to (43,18)
 
@@ -443,28 +443,31 @@ func TestLogoReconstruction(t *testing.T) {
 		t.Errorf("col 3, row 7 should be SMPTE bar, got %q", string(grid.Chars[7][3]))
 	}
 
-	// Verify 'h' glyph at (5, 8) scale 2:
-	// h row 0: #.. → cols 5-6 should be '#', cols 7-10 should be '@'
+	// Verify 'H' glyph at (5, 8) scale 2:
+	// H row 0: #.# → cols 5-6='#', cols 7-8='@', cols 9-10='#'
 	if grid.Chars[8][5] != '#' || grid.Chars[8][6] != '#' {
-		t.Error("h: top-left 2×2 block should be '#'")
+		t.Error("H: top-left 2×2 block should be '#'")
 	}
-	if grid.Chars[8][7] != '@' {
-		t.Errorf("h: col 7, row 8 should be '@', got %q", string(grid.Chars[8][7]))
+	if grid.Chars[8][7] != '@' || grid.Chars[8][8] != '@' {
+		t.Errorf("H: cols 7-8, row 8 should be '@'")
+	}
+	if grid.Chars[8][9] != '#' || grid.Chars[8][10] != '#' {
+		t.Error("H: top-right 2×2 block should be '#'")
 	}
 
-	// Verify 'i' glyph: starts at offsetX + 1*4*scale = 5 + 8 = 13
-	// i row 0: .#. → cols 13-14='@', cols 15-16='#', cols 17-18='@'
-	if grid.Chars[8][15] != '#' || grid.Chars[8][16] != '#' {
-		t.Error("i: dot (row 0) should be '#' at cols 15-16")
-	}
-	if grid.Chars[8][13] != '@' || grid.Chars[8][14] != '@' {
-		t.Error("i: row 0 cols 13-14 should be '@'")
-	}
-	// i row 1: ... → all '@' (blank row)
+	// Verify 'I' glyph: starts at offsetX + 1*4*scale = 5 + 8 = 13
+	// I row 0: ### → cols 13-18 all '#'
 	for x := 13; x <= 18; x++ {
-		if grid.Chars[10][x] != '@' {
-			t.Errorf("i: blank row 1, col %d should be '@', got %q", x, string(grid.Chars[10][x]))
+		if grid.Chars[8][x] != '#' {
+			t.Errorf("I: top row, col %d should be '#', got %q", x, string(grid.Chars[8][x]))
 		}
+	}
+	// I row 1: .#. → cols 13-14='@', cols 15-16='#', cols 17-18='@'
+	if grid.Chars[10][15] != '#' || grid.Chars[10][16] != '#' {
+		t.Error("I: center pixel row 1 should be '#' at cols 15-16")
+	}
+	if grid.Chars[10][13] != '@' || grid.Chars[10][14] != '@' {
+		t.Error("I: row 1 cols 13-14 should be '@'")
 	}
 
 	// Verify '2' glyph starts at offsetX + 2*4*scale = 5 + 16 = 21

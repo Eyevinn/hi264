@@ -3,10 +3,10 @@
 # Cross position: 5:2:9 horizontally, 4:2:4 vertically
 @rgb
 
-# Blue: NCS 4055-R95B (official)
-B=0,106,167
-# Yellow: NCS 0580-Y10R (official)
-Y=254,204,0
+# Blue: #005293
+B=0,82,147
+# Yellow: #FECB00
+Y=254,203,0
 
 BBBBBYYBBBBBBBBB
 BBBBBYYBBBBBBBBB

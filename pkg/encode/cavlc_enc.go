@@ -318,25 +318,50 @@ func writeLevelVLC(w *BitWriter, levelCode, suffixLength int) {
 	// When suffixLength == 0:
 	//   levelCode  0-13: prefix = levelCode, no suffix
 	//   levelCode 14-29: prefix = 14, 4-bit suffix = levelCode - 14
-	//   levelCode >= 30: prefix = 15, 12-bit suffix = levelCode - 30
+	//   levelCode >= 30: prefix >= 15, (prefix-3)-bit suffix
 	//
 	// When suffixLength > 0:
 	//   prefix = levelCode >> suffixLength
 	//   prefix < 14:  suffix = levelCode & ((1<<suffixLength)-1), suffixLength bits
 	//   prefix == 14: suffix = levelCode - (14<<suffixLength), suffixLength bits
-	//   prefix >= 15: escape with 12-bit suffix
+	//   prefix >= 15: (prefix-3)-bit suffix
+	//
+	// For prefix >= 15, the decoder computes:
+	//   levelCode = min(15,prefix)<<suffixLength + suffix
+	//   if prefix >= 15 && suffixLength == 0: levelCode += 15
+	//   if prefix >= 16: levelCode += (1<<(prefix-3)) - 4096
 
 	var levelPrefix int
 	if suffixLength > 0 {
 		levelPrefix = levelCode >> uint(suffixLength)
+		if levelPrefix >= 15 {
+			// Need escape coding. Find the correct prefix >= 15.
+			// prefix=15: range [(15<<sL), (15<<sL) + 4095]
+			// prefix=P (P>=16): base = (15<<sL) + (1<<(P-3)) - 4096
+			//   range [base, base + (1<<(P-3)) - 1]
+			levelPrefix = 15
+			base := 15 << uint(suffixLength)
+			for levelCode >= base+(1<<uint(levelPrefix-3)) {
+				base += 1 << uint(levelPrefix-3)
+				levelPrefix++
+			}
+		}
 	} else {
-		// suffixLength == 0: clamp prefix to route correctly
 		if levelCode < 14 {
 			levelPrefix = levelCode
 		} else if levelCode < 30 {
 			levelPrefix = 14
 		} else {
+			// Find the correct escape prefix for large levelCodes.
+			// prefix=15: levelCode range [30, 30+4095]
+			// prefix=P (P>=16): base = 30 + (1<<(P-3)) - 4096
+			//   levelCode range [base, base + (1<<(P-3)) - 1]
 			levelPrefix = 15
+			base := 30
+			for levelCode >= base+(1<<uint(levelPrefix-3)) {
+				base += 1 << uint(levelPrefix-3)
+				levelPrefix++
+			}
 		}
 	}
 
@@ -366,20 +391,25 @@ func writeLevelVLC(w *BitWriter, levelCode, suffixLength int) {
 			w.WriteBits(uint32(suffix), 4)
 		}
 	} else {
-		// level_prefix >= 15: use escape coding
-		// prefix = 15 (15 zeros + 1), suffix = 12 bits
-		for range 15 {
+		// level_prefix >= 15: escape coding with (prefix-3) suffix bits
+		for range levelPrefix {
 			w.WriteBit(0)
 		}
 		w.WriteBit(1)
-		suffBits := 12
-		var escapeOffset int
+		suffBits := levelPrefix - 3
+
+		// Compute the base levelCode for this prefix (inverse of decoder formula)
+		var base int
 		if suffixLength > 0 {
-			escapeOffset = 15 << uint(suffixLength)
+			base = 15 << uint(suffixLength)
 		} else {
-			escapeOffset = 15 + (1 << 4) - 1 // = 30 for suffixLength=0
+			base = 30
 		}
-		suffix := levelCode - escapeOffset
+		if levelPrefix >= 16 {
+			base += (1 << uint(levelPrefix-3)) - 4096
+		}
+
+		suffix := levelCode - base
 		w.WriteBits(uint32(suffix), suffBits)
 	}
 }

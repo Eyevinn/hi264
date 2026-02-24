@@ -14,6 +14,14 @@ func ParseImageFile(r io.Reader, isRGB bool) (*Grid, ColorMap, error) {
 	return grid, colors, err
 }
 
+// ImageFileResult holds the parsed result of a .gridimg file.
+type ImageFileResult struct {
+	Grid      *Grid
+	Colors    ColorMap
+	CS        ColorSpace
+	BlockSize int // 16 (default) or 8
+}
+
 // ParseImageFileCS parses a combined image file containing color definitions and a grid,
 // with color space support.
 //
@@ -23,6 +31,7 @@ func ParseImageFile(r io.Reader, isRGB bool) (*Grid, ColorMap, error) {
 //	@rgb           (optional: treat color values as RGB instead of YCbCr)
 //	@bt709         (optional: use BT.709 for RGB→YCbCr conversion)
 //	@bt2020        (optional: use BT.2020 for RGB→YCbCr conversion)
+//	@8x8           (optional: grid characters map to 8x8 blocks instead of 16x16)
 //	x=235,128,128
 //	y=16,128,128
 //
@@ -32,16 +41,27 @@ func ParseImageFile(r io.Reader, isRGB bool) (*Grid, ColorMap, error) {
 // Color definitions come first (one per line: char=v1,v2,v3).
 // A @rgb directive anywhere before the grid makes colors be treated as RGB.
 // @bt709 or @bt2020 directives set the color space for RGB→YCbCr conversion.
+// @8x8 makes each grid character represent an 8x8 block instead of 16x16.
 // An empty line separates colors from the grid.
-// Grid rows follow (one character per macroblock column).
+// Grid rows follow (one character per block column).
 // The isRGB parameter from the CLI flag is OR'd with the @rgb directive.
 // The cs parameter provides the default color space; file directives override it.
 // Returns the grid, color map, effective color space, and any error.
 func ParseImageFileCS(r io.Reader, isRGB bool, cs ColorSpace, rng Range) (*Grid, ColorMap, ColorSpace, error) {
+	res, err := ParseImageFileFull(r, isRGB, cs, rng)
+	if err != nil {
+		return nil, nil, cs, err
+	}
+	return res.Grid, res.Colors, res.CS, nil
+}
+
+// ParseImageFileFull parses a .gridimg file and returns the full result including block size.
+func ParseImageFileFull(r io.Reader, isRGB bool, cs ColorSpace, rng Range) (*ImageFileResult, error) {
 	scanner := bufio.NewScanner(r)
 	var colorSpecs []string // raw "char=v1,v2,v3" strings, parsed after we know isRGB
 	var gridLines []string
 	inGrid := false
+	blockSize := 16
 
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -72,8 +92,10 @@ func ParseImageFileCS(r io.Reader, isRGB bool, cs ColorSpace, rng Range) (*Grid,
 					cs = BT2020
 				case "@bt601", "@bt.601":
 					cs = BT601
+				case "@8x8":
+					blockSize = 8
 				default:
-					return nil, nil, cs, fmt.Errorf("unknown directive %q", trimmed)
+					return nil, fmt.Errorf("unknown directive %q", trimmed)
 				}
 				continue
 			}
@@ -98,7 +120,7 @@ func ParseImageFileCS(r io.Reader, isRGB bool, cs ColorSpace, rng Range) (*Grid,
 	}
 
 	if err := scanner.Err(); err != nil {
-		return nil, nil, cs, fmt.Errorf("read image file: %w", err)
+		return nil, fmt.Errorf("read image file: %w", err)
 	}
 
 	// Parse color specs now that we know the final isRGB and color space
@@ -106,19 +128,24 @@ func ParseImageFileCS(r io.Reader, isRGB bool, cs ColorSpace, rng Range) (*Grid,
 	for _, spec := range colorSpecs {
 		ch, c, err := ParseColorSpecCS(spec, isRGB, cs, rng)
 		if err != nil {
-			return nil, nil, cs, fmt.Errorf("parse color: %w", err)
+			return nil, fmt.Errorf("parse color: %w", err)
 		}
 		colors[ch] = c
 	}
 
 	if len(gridLines) == 0 {
-		return nil, nil, cs, fmt.Errorf("no grid found in image file")
+		return nil, fmt.Errorf("no grid found in image file")
 	}
 
 	grid, err := ParseGrid(strings.Join(gridLines, "\n"))
 	if err != nil {
-		return nil, nil, cs, fmt.Errorf("parse grid: %w", err)
+		return nil, fmt.Errorf("parse grid: %w", err)
 	}
 
-	return grid, colors, cs, nil
+	return &ImageFileResult{
+		Grid:      grid,
+		Colors:    colors,
+		CS:        cs,
+		BlockSize: blockSize,
+	}, nil
 }

@@ -7,13 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+#### 8x8 block granularity
+- 8x8 block resolution for encoder: each grid character maps to an 8×8 block instead of 16×16, with 4 blocks per macroblock and proper AC residual encoding at quadrant boundaries
+- `-8x8` CLI flag to enable 8x8 block mode (also settable via `@8x8` directive in `.gridimg`)
+- `PlaneGrid` type: direct Y/Cb/Cr value planes with no character-count limit, supporting both 16×16 and 8×8 block granularity
+- Forward 4×4 integer DCT (`ForwardTransform4x4`) for non-constant blocks in 8×8 mode
+- PlaneGrid-aware encoding paths for both CAVLC and CABAC
+- `GenerateIDRFromPlane()` public API for encoding from PlaneGrid
+- `@8x8` directive in `.gridimg` format
+- `examples/sweden_8x8.gridimg` and `examples/swiss_8x8.gridimg` example files
+
+#### Double-resolution text glyphs
+- 6×10 (`Glyph2x`) font bitmaps for 8×8 block mode — 4× the detail of standard 3×5 glyphs at the same pixel footprint (48×80 pixels per character)
+- `TextGrid2x()`, `AutoTextScale2x()`, `OverlayText2x()` for 8×8 block text rendering
+- Auto-selection of 2× font for even text scales (2, 4, 6…) in 16×16 mode, giving sharper glyphs without requiring `-8x8`
+- `UpscaleGrid()` helper to tile 16×16 pattern backgrounds at 8×8 block resolution for the 2× font path
+
 ### Changed
 - Minimal Go version 1.24
-- Ran go fix to modernize the code
+- Ran `go fix` to modernize the code
 - hi264gen uses `bufio.Writer`, reducing write syscalls by ~87%
+- **Breaking:** Text character set reduced to match both fonts: A-Z 0-9 and `! # % + - . / : = ? [ ] _ ( )` plus space. Removed lowercase glyphs (a-z) and rarely-used punctuation (`" $ & ' * , ; < > @ \ ^ { | } ~`). Lowercase input is now auto-uppercased.
+- SMPTE bars distribute at 8×8 block-column granularity in `-8x8` mode for more even bar widths
+- `examples/sweden.gridimg` updated to more widely recognized digital flag colors (#005293 blue, #FECB00 yellow)
+- Internal: `BuildFrame` rewired through PlaneGrid; all CLI output paths use PlaneGrid as intermediate
 
 ### Fixed
-- signal proper level depending on resolution, fps, and bitrate
+- Signal proper H.264 level depending on resolution, fps, and bitrate
+- CAVLC level VLC encoding for large coefficients: fix overflow when `levelCode >> suffixLength >= 15`, and support prefix ≥ 16 for `suffixLength == 0` (needed at QP=0)
+- Encoder reconstruction order: inverse Hadamard before dequant (matching H.264 spec and decoder), eliminating rounding errors for non-uniform DC values
+- SMPTE bars in `-8x8` mode: bars now distributed at block-column granularity instead of macroblock granularity
+- `-8x8` CLI flag correctly takes priority over `.gridimg` default block size
 
 ## [0.9.0] - 2026-02-17
 
