@@ -96,7 +96,7 @@ images for encode-decode chain verification.
 go run ./cmd/hi264gen -gi examples/sweden.gridimg -o sweden.264
 go run ./cmd/hi264gen -gi examples/sweden.gridimg -cabac -o sweden_cabac.264
 go run ./cmd/hi264gen -gp "xy,yx" -gc x=235,128,128 -gc y=16,128,128 -o checker.264
-go run ./cmd/hi264gen -gp "ab" -gc a=255,0,0 -gc b=0,0,255 -rgb -qp 20 -no-deblock -o test.264
+go run ./cmd/hi264gen -gp "ab" -gc a=255,0,0 -gc b=0,0,255 -rgb -qp 20 -o test.264
 
 # Text overlay: frame counter on solid background
 go run ./cmd/hi264gen -w 176 -h 80 -n 10 -text "%03d" -o counter.264
@@ -185,7 +185,7 @@ Lowercase input is auto-uppercased.
 | `-bg` | Background color (R,G,B) | — |
 | `-qp` | Quantization parameter | 26 |
 | `-cabac` | Use CABAC entropy coding (Main profile) | off (CAVLC) |
-| `-no-deblock` | Disable deblocking filter | off |
+| `-use-deblock` | Enable deblocking filter (see note below) | off |
 | `-q` | JPEG quality | 85 |
 | `-idr-interval` | Frames between IDR keyframes (0 = all-IDR) | 0 |
 | `-bpp` | Bytes per picture (filler NAL padding) | 0 (off) |
@@ -195,6 +195,16 @@ Lowercase input is auto-uppercased.
 | `-fps` | MP4 framerate | 25 |
 | `-frag-dur` | MP4 fragment duration in frames | 25 |
 | `-o` | Output file (`-` for stdout) | — |
+
+### Deblocking filter
+
+The H.264 deblocking (loop) filter is disabled by default in hi264gen. Because
+the encoder produces block-constrained content (one flat color per 16x16 or 8x8
+block), the deblocking filter interprets intentional color transitions at block
+boundaries as compression artifacts and smooths them out. This causes visible
+bleeding between adjacent blocks and measurably lowers fidelity — PSNR
+measurements show a 6-14 dB loss depending on QP when deblocking is enabled.
+Use `-use-deblock` to re-enable it if needed.
 
 ### Constant bitrate testing with `-bpp` / `-kbps`
 

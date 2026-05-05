@@ -91,7 +91,7 @@ type options struct {
 	bg          string
 	qp          int
 	cabac       bool
-	noDeblock   bool
+	useDeblock  bool
 	idrInterval int
 	bpp         int
 	kbps        int
@@ -128,7 +128,7 @@ func parseOptions(fs *flag.FlagSet, args []string) (*options, error) {
 	fs.StringVar(&opts.bg, "bg", "0,0,0", "background RGB color for text (R,G,B)")
 	fs.IntVar(&opts.qp, "qp", 26, "quantization parameter (0-51)")
 	fs.BoolVar(&opts.cabac, "cabac", false, "use CABAC entropy coding (Main profile)")
-	fs.BoolVar(&opts.noDeblock, "no-deblock", false, "disable deblocking filter")
+	fs.BoolVar(&opts.useDeblock, "use-deblock", false, "enable deblocking filter (off by default)")
 	fs.IntVar(&opts.idrInterval, "idr-interval", 0, "frames between IDR frames (0 = every frame is IDR)")
 	fs.IntVar(&opts.bpp, "bpp", 0, "target bytes per picture (pad with filler NALUs)")
 	fs.IntVar(&opts.kbps, "kbps", 0, "target bitrate in kbit/s (converted to bytes per picture using -fps)")
@@ -471,9 +471,9 @@ func run(args []string) error {
 		textBg = &c
 	}
 
-	disableDeblock := 0
-	if opts.noDeblock {
-		disableDeblock = 1
+	disableDeblock := 1
+	if opts.useDeblock {
+		disableDeblock = 0
 	}
 
 	// Resolve output format
