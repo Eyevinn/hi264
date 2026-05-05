@@ -46,7 +46,7 @@ verify() {
 
     # 1. Generate .264 bitstream
     local h264="$TMPDIR/${name}.264"
-    go run ./cmd/hi264gen -gp "$grid" $color_flags $cabac_flag -no-deblock -o "$h264"
+    go run ./cmd/hi264gen -gp "$grid" $color_flags $cabac_flag -o "$h264"
 
     # 2. Decode with hi264dec (hi264dec adds _WxH_yuv420p suffix for .yuv)
     local go_yuv="$TMPDIR/${name}_go_${width}x${height}_yuv420p.yuv"
