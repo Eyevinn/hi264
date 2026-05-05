@@ -178,9 +178,6 @@ Flags:
 | `-text` | Text overlay pattern (e.g. `"%03d"`, `"%mm:%ss.%ff"`, `\n` for newlines) | — |
 | `-text-scale` | Text scale factor (0 = auto-fit) | 0 |
 | `-text-bg` | Text background box color (R,G,B) | none |
-
-Text supports **A-Z 0-9** and punctuation **! # % + - . / : = ? [ ] _ ( )** plus space.
-Lowercase input is auto-uppercased.
 | `-fg` | Foreground color (R,G,B) | — |
 | `-bg` | Background color (R,G,B) | — |
 | `-qp` | Quantization parameter | 26 |
@@ -195,6 +192,9 @@ Lowercase input is auto-uppercased.
 | `-fps` | MP4 framerate | 25 |
 | `-frag-dur` | MP4 fragment duration in frames | 25 |
 | `-o` | Output file (`-` for stdout) | — |
+
+Text supports **A-Z 0-9** and punctuation **! # % + - . / : = ? [ ] _ ( )** plus space.
+Lowercase input is auto-uppercased.
 
 ### Deblocking filter
 
