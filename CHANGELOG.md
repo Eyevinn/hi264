@@ -25,6 +25,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Auto-selection of 2× font for even text scales (2, 4, 6…) in 16×16 mode, giving sharper glyphs without requiring `-8x8`
 - `UpscaleGrid()` helper to tile 16×16 pattern backgrounds at 8×8 block resolution for the 2× font path
 
+#### PSNR tool
+- New `cmd/rawpsnr` CLI: compares two raw YUV420 files and reports overall, per-component, and (with `-per-mb`) per-16×16-macroblock PSNR; optional `-csv` export
+
 #### PNG/JPEG image backgrounds
 - `-gi photo.png` / `-gi photo.jpg` for using PNG/JPEG images as backgrounds
   - Without `-w`/`-h`: uses native image dimensions at 1:1 block sampling
@@ -38,6 +41,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `pkg/yuv.TilePlaneGrid()` for tiling a PlaneGrid to larger dimensions
 
 ### Changed
+- **Breaking:** hi264gen deblocking filter is off by default; `-no-deblock` is replaced by `-use-deblock` to opt back in. Block-flat encoder output gets smoothed across intentional boundaries by the loop filter, costing 6–14 dB PSNR depending on QP.
 - Minimal Go version 1.24
 - Ran `go fix` to modernize the code
 - hi264gen uses `bufio.Writer`, reducing write syscalls by ~87%
