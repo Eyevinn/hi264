@@ -204,6 +204,11 @@ bash tools/verify_hi264gen.sh
 # Decode without deblocking (isolates per-MB errors)
 go run ./cmd/hi264dec -no-deblock input.264 output.yuv
 
+# Compare two raw YUV files (overall, per-component, per-MB PSNR)
+go run ./cmd/rawpsnr -w 320 -h 240 a.yuv b.yuv
+go run ./cmd/rawpsnr -w 320 -h 240 -per-mb a.yuv b.yuv
+go run ./cmd/rawpsnr -w 320 -h 240 -csv mb.csv a.yuv b.yuv
+
 # Decode multiple frames
 go run ./cmd/hi264dec -n 10 input.264 output.y4m
 
@@ -226,6 +231,7 @@ internal/transform/— Internal: Inverse quantization and transform (4x4, 8x8, D
 internal/pred/     — Internal: Intra prediction modes (4x4, 8x8, 16x16, chroma)
 cmd/hi264dec/      — CLI: decode H.264 from raw .264 or MP4 containers
 cmd/hi264gen/      — CLI: generate H.264 test bitstreams or raw images from grid patterns
+cmd/rawpsnr/       — CLI: compare two raw YUV420 files (overall / per-component / per-MB PSNR)
 examples/          — Example grid image files (.gridimg)
 tools/             — Test generation and verification scripts
 testdata/          — Golden H.264 bitstreams for regression testing

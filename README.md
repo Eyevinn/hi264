@@ -240,6 +240,18 @@ This makes it easy to verify that an ABR player switches between the correct
 renditions — you can tell which bitrate tier is active just by looking at the
 background color.
 
+### rawpsnr — PSNR comparison for raw YUV files
+
+Compares two raw YUV420 files and reports overall, per-component, and (with
+`-per-mb`) per-16×16-macroblock PSNR. Useful for measuring encoder fidelity and
+isolating which macroblocks the deblocking filter damages.
+
+```bash
+go run ./cmd/rawpsnr -w 320 -h 240 a.yuv b.yuv
+go run ./cmd/rawpsnr -w 320 -h 240 -per-mb a.yuv b.yuv
+go run ./cmd/rawpsnr -w 320 -h 240 -csv mb.csv a.yuv b.yuv
+```
+
 ## Image File Format
 
 The `.gridimg` format combines color definitions and a grid layout in one file:
