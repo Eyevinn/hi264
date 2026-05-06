@@ -252,6 +252,31 @@ go run ./cmd/rawpsnr -w 320 -h 240 -per-mb a.yuv b.yuv
 go run ./cmd/rawpsnr -w 320 -h 240 -csv mb.csv a.yuv b.yuv
 ```
 
+### hi264-mp4-extend — extend a fragmented MP4 segment with empty frames
+
+Reads an init segment for SPS/PPS plus a media segment for samples and
+timing, then writes a single-fragment media segment containing all the
+input samples followed by N appended frames at the same per-sample
+duration. By default the appended frames are P\_Skip copies of the
+source's last reference picture (a freeze on the last frame). With
+`-black-idr` the first appended frame is a black IDR (POC reset) and
+the rest are P\_Skip copies of that IDR. The output is self-contained:
+
+```bash
+# Freeze a 1-second segment for one more second.
+go run ./cmd/hi264-mp4-extend -frames 25 init.mp4 seg1s.m4s seg2s.m4s
+
+# Splice a 1-second black tail.
+go run ./cmd/hi264-mp4-extend -frames 25 -black-idr init.mp4 seg1s.m4s seg2s.m4s
+
+# Play the result alongside the original init segment.
+cat init.mp4 seg2s.m4s | ffplay -i -
+```
+
+Constraints: SPS `pic_order_cnt_type` 0 or 2 (type 1 unsupported); 8-bit
+4:2:0 progressive. Works with the foreign SPS/PPS the source provides —
+no reset of the parameter sets in the output.
+
 ## Image File Format
 
 The `.gridimg` format combines color definitions and a grid layout in one file:
@@ -453,9 +478,11 @@ internal/transform/— Internal: Inverse quantization and transform (4x4, 8x8, D
 internal/pred/     — Internal: Intra prediction modes (4x4, 8x8, 16x16, chroma)
 cmd/hi264dec/      — CLI: decode H.264 from raw .264 or MP4 containers
 cmd/hi264gen/      — CLI: generate H.264 bitstreams or raw images from grid patterns
+cmd/rawpsnr/       — CLI: per-frame / per-MB PSNR comparison for raw YUV
+cmd/hi264-mp4-extend/ — CLI: extend a fragmented MP4 segment with empty frames
 examples/          — Example grid image files
 tools/             — Test generation and verification scripts
-testdata/          — Golden H.264 bitstreams for regression testing
+testdata/          — Golden H.264 bitstreams and fragmented MP4 fixtures
 ```
 
 ## Dependencies

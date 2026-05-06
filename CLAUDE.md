@@ -213,6 +213,12 @@ go run ./cmd/rawpsnr -w 320 -h 240 a.yuv b.yuv
 go run ./cmd/rawpsnr -w 320 -h 240 -per-mb a.yuv b.yuv
 go run ./cmd/rawpsnr -w 320 -h 240 -csv mb.csv a.yuv b.yuv
 
+# Extend a fragmented MP4 (CMAF) segment with empty frames
+# (P_Skip freeze; with -black-idr a black IDR + P_Skip tail)
+go run ./cmd/hi264-mp4-extend -frames 25 init.mp4 seg1s.m4s seg2s.m4s
+go run ./cmd/hi264-mp4-extend -frames 25 -black-idr init.mp4 seg1s.m4s seg2s.m4s
+cat init.mp4 seg2s.m4s | ffplay -i -
+
 # Decode multiple frames
 go run ./cmd/hi264dec -n 10 input.264 output.y4m
 
@@ -236,6 +242,7 @@ internal/pred/     — Internal: Intra prediction modes (4x4, 8x8, 16x16, chroma
 cmd/hi264dec/      — CLI: decode H.264 from raw .264 or MP4 containers
 cmd/hi264gen/      — CLI: generate H.264 test bitstreams or raw images from grid patterns
 cmd/rawpsnr/       — CLI: compare two raw YUV420 files (overall / per-component / per-MB PSNR)
+cmd/hi264-mp4-extend/ — CLI: extend a fragmented MP4 (CMAF) segment with empty P_Skip frames or a black IDR + P_Skip tail
 examples/          — Example grid image files (.gridimg)
 tools/             — Test generation and verification scripts
 testdata/          — Golden H.264 bitstreams for regression testing

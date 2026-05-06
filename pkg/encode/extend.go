@@ -55,10 +55,12 @@ func LastFrameState(annexB []byte) (frameNum uint32, picOrderCntLsb uint32, err 
 	if lastSlice == nil {
 		return 0, 0, fmt.Errorf("LastFrameState: no coded slice found")
 	}
-	if lastSPS != nil && lastSPS.PicOrderCntType != 0 {
-		return 0, 0, fmt.Errorf("LastFrameState: pic_order_cnt_type=%d not supported (only type 0)",
+	if lastSPS != nil && lastSPS.PicOrderCntType != 0 && lastSPS.PicOrderCntType != 2 {
+		return 0, 0, fmt.Errorf("LastFrameState: pic_order_cnt_type=%d not supported (only types 0 and 2)",
 			lastSPS.PicOrderCntType)
 	}
+	// For pic_order_cnt_type=2 the slice header has no pic_order_cnt_lsb;
+	// callers should treat the returned LSB as unused in that case.
 	return uint32(lastSlice.FrameNum), uint32(lastSlice.PicOrderCntLsb), nil
 }
 
