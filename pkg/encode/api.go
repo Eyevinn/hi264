@@ -101,6 +101,40 @@ func GenerateIDR(p EncodeParams, grid *yuv.Grid, colors yuv.ColorMap, idrPicID u
 	return enc.EncodeSlice(idrPicID)
 }
 
+// GenerateIDRWithSPSPPS encodes a single IDR slice that references an
+// existing SPS and PPS (typically extracted from the bitstream you're
+// extending). The returned NALU has no fresh SPS/PPS — it is meant to be
+// muxed into a stream that already declares them. Use this when splicing
+// a fresh IDR onto an arbitrary upstream encoder's output.
+//
+// Constraints inherited from the FrameEncoder I_16x16 DC path: the source
+// PPS must use entropy_coding_mode_flag matching p.CABAC; chroma_qp_offset
+// is ignored (only matters for non-zero chroma residuals — fine for flat
+// colors). Returns the IDR slice NALU in Annex-B format.
+func GenerateIDRWithSPSPPS(p EncodeParams, sps *avc.SPS, pps *avc.PPS,
+	plane *yuv.PlaneGrid, idrPicID uint32) ([]byte, error) {
+	if err := p.validate(); err != nil {
+		return nil, err
+	}
+	if sps.PicOrderCntType != 0 && sps.PicOrderCntType != 2 {
+		return nil, fmt.Errorf("GenerateIDRWithSPSPPS: pic_order_cnt_type=%d not supported (only 0 and 2)",
+			sps.PicOrderCntType)
+	}
+	enc := &FrameEncoder{
+		Plane:          plane,
+		QP:             p.qp(),
+		DisableDeblock: p.DisableDeblock,
+		CABAC:          pps.EntropyCodingModeFlag,
+		Width:          p.Width,
+		Height:         p.Height,
+		ColorSpace:     p.ColorSpace,
+		Range:          p.Range,
+		SPS:            sps,
+		PPS:            pps,
+	}
+	return enc.EncodeSlice(idrPicID)
+}
+
 // GenerateIDRFromPlane encodes an IDR frame from a PlaneGrid.
 // Returns the IDR slice NALU in Annex-B format (no SPS/PPS).
 func GenerateIDRFromPlane(p EncodeParams, plane *yuv.PlaneGrid, idrPicID uint32) ([]byte, error) {

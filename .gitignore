@@ -5,6 +5,8 @@ references/
 testdata/*.yuv
 testdata/*.mp4
 !testdata/progressive_32x32.mp4
+!testdata/frag1s.mp4
+!testdata/init.mp4
 testdata/golden/*.yuv
 
 # Build output

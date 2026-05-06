@@ -24,10 +24,11 @@ import (
 // Returns an Annex-B framed non-IDR NALU (type=1, ref_idc=2).
 func EncodePSkipSlice(sps *avc.SPS, pps *avc.PPS,
 	frameNum uint32, picOrderCntLsb uint32, disableDeblock int) ([]byte, error) {
-	// Validate: only POC type 0
-	if sps.PicOrderCntType != 0 {
+	// Validate: POC types 0 and 2 are supported (type 1 requires extra
+	// per-frame syntax we don't emit).
+	if sps.PicOrderCntType != 0 && sps.PicOrderCntType != 2 {
 		return nil, fmt.Errorf("EncodePSkipSlice: pic_order_cnt_type=%d "+
-			"not supported (only type 0)", sps.PicOrderCntType)
+			"not supported (only types 0 and 2)", sps.PicOrderCntType)
 	}
 	// Validate: progressive only
 	if !sps.FrameMbsOnlyFlag {
@@ -47,7 +48,9 @@ func EncodePSkipSlice(sps *avc.SPS, pps *avc.PPS,
 func encodePSkipSliceCAVLC(sps *avc.SPS, pps *avc.PPS,
 	frameNum uint32, picOrderCntLsb uint32, disableDeblock int, totalMBs int) ([]byte, error) {
 	w := NewBitWriter()
-	WritePSliceHeader(w, frameNum, picOrderCntLsb, 0, disableDeblock,
+	WritePSliceHeader(w, frameNum, picOrderCntLsb,
+		uint8(sps.PicOrderCntType), pps.WeightedPredFlag,
+		0, disableDeblock,
 		uint32(sps.Log2MaxFrameNumMinus4),
 		uint32(sps.Log2MaxPicOrderCntLsbMinus4),
 		pps.PicParameterSetID,
@@ -77,7 +80,9 @@ func encodePSkipSliceCABAC(sps *avc.SPS, pps *avc.PPS,
 
 	// Build slice header with CABAC alignment
 	headerW := NewBitWriter()
-	WritePSliceHeaderCABAC(headerW, frameNum, picOrderCntLsb, 0, disableDeblock,
+	WritePSliceHeaderCABAC(headerW, frameNum, picOrderCntLsb,
+		uint8(sps.PicOrderCntType), pps.WeightedPredFlag,
+		0, disableDeblock,
 		uint32(sps.Log2MaxFrameNumMinus4),
 		uint32(sps.Log2MaxPicOrderCntLsbMinus4),
 		pps.PicParameterSetID,

@@ -26,6 +26,43 @@ type FrameEncoder struct {
 	Range           yuv.Range      // sample value range (default LimitedRange)
 	FPS             int            // frame rate for level selection (0 = ignore MBPS)
 	Kbps            int            // bitrate in kbit/s for level selection (0 = ignore)
+
+	// SPS/PPS, when non-nil, control IDR slice-header bit widths,
+	// pic_order_cnt_type, pic_parameter_set_id, and slice_qp_delta
+	// (compensating for pic_init_qp_minus26). This is what makes a
+	// stand-alone IDR slice compatible with foreign parameter sets when
+	// extending an existing stream. When both are nil, hi264's own
+	// defaults are used (4 bits each for frame_num and POC LSB,
+	// pps_id=0, pic_init_qp=26).
+	SPS *avc.SPS
+	PPS *avc.PPS
+}
+
+// idrSliceHeader returns the slice-header fields for an IDR slice using
+// the encoder's SPS/PPS overrides if set, otherwise hi264's defaults.
+func (e *FrameEncoder) idrSliceHeader(idrPicID uint32) IDRSliceHeader {
+	h := IDRSliceHeader{
+		QPDelta:                     int32(e.QP - 26),
+		DisableDeblock:              e.DisableDeblock,
+		IDRPicID:                    idrPicID,
+		PPSID:                       0,
+		Log2MaxFrameNumMinus4:       0,
+		Log2MaxPicOrderCntLsbMinus4: 0,
+		PicOrderCntType:             0,
+		DeblockControlPresent:       true,
+	}
+	if e.SPS != nil {
+		h.Log2MaxFrameNumMinus4 = uint32(e.SPS.Log2MaxFrameNumMinus4)
+		h.Log2MaxPicOrderCntLsbMinus4 = uint32(e.SPS.Log2MaxPicOrderCntLsbMinus4)
+		h.PicOrderCntType = uint8(e.SPS.PicOrderCntType)
+	}
+	if e.PPS != nil {
+		h.PPSID = e.PPS.PicParameterSetID
+		h.DeblockControlPresent = e.PPS.DeblockingFilterControlPresentFlag
+		// slice_qp = pic_init_qp + slice_qp_delta. Solve for delta.
+		h.QPDelta = int32(e.QP-26) - int32(e.PPS.PicInitQpMinus26)
+	}
+	return h
 }
 
 // plane returns the PlaneGrid to use for encoding, converting Grid+Colors if needed.
@@ -135,11 +172,9 @@ func (e *FrameEncoder) encodeSliceCAVLC(idrPicID uint32) ([]byte, error) {
 	width := mbWidth * 16
 	height := mbHeight * 16
 
-	qpDelta := int32(e.QP - 26) // pic_init_qp = 26, so delta = QP - 26
-
 	// Build slice (header + MB data) in a single BitWriter to maintain bit alignment
 	sliceW := NewBitWriter()
-	WriteSliceHeader(sliceW, qpDelta, e.DisableDeblock, idrPicID)
+	WriteSliceHeader(sliceW, e.idrSliceHeader(idrPicID))
 
 	// Encode macroblocks
 	// Track nC (number of non-zero coefficients) per 4x4 block for context
@@ -210,9 +245,8 @@ func (e *FrameEncoder) encodeSliceCABAC(idrPicID uint32) ([]byte, error) {
 	height := mbHeight * 16
 
 	// Build slice header with CABAC alignment
-	qpDelta := int32(e.QP - 26)
 	headerW := NewBitWriter()
-	WriteSliceHeaderCABAC(headerW, qpDelta, e.DisableDeblock, idrPicID)
+	WriteSliceHeaderCABAC(headerW, e.idrSliceHeader(idrPicID))
 	headerBytes := headerW.Bytes()
 
 	// Initialize CABAC encoder and context models

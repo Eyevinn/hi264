@@ -202,26 +202,32 @@ func TestLastFrameState_NoSlices(t *testing.T) {
 	}
 }
 
-// TestLastFrameState_PocType2Rejected verifies that streams using
-// pic_order_cnt_type != 0 are rejected (as the extension API can't handle them).
-func TestLastFrameState_PocType2Rejected(t *testing.T) {
-	// Hand-build an SPS with PicOrderCntType=2.
+// TestLastFrameState_PocType1Rejected verifies that streams using
+// pic_order_cnt_type 1 are rejected. Types 0 and 2 are supported.
+func TestLastFrameState_PocType1Rejected(t *testing.T) {
+	// Hand-build an SPS with PicOrderCntType=1. (Types 0 and 2 are accepted.)
 	sw := NewBitWriter()
 	sw.WriteBits(66, 8) // profile_idc=Baseline
 	sw.WriteBits(0xC0, 8)
 	sw.WriteBits(30, 8) // level_idc
 	sw.WriteUE(0)       // seq_parameter_set_id
 	sw.WriteUE(0)       // log2_max_frame_num_minus4
-	sw.WriteUE(2)       // pic_order_cnt_type = 2
-	sw.WriteUE(1)       // max_num_ref_frames
-	sw.WriteBit(0)      // gaps_in_frame_num_value_allowed_flag
-	sw.WriteUE(0)       // pic_width_in_mbs_minus1
-	sw.WriteUE(0)       // pic_height_in_map_units_minus1
-	sw.WriteBit(1)      // frame_mbs_only_flag
-	sw.WriteBit(0)      // direct_8x8_inference_flag
-	sw.WriteBit(0)      // frame_cropping_flag
-	sw.WriteBit(0)      // vui_parameters_present_flag
-	sw.WriteBit(1)      // rbsp_stop_one_bit
+	sw.WriteUE(1)       // pic_order_cnt_type = 1
+	// pic_order_cnt_type=1 needs more SPS fields, but ParseSPSNALUnit will
+	// still set PicOrderCntType=1 which is what LastFrameState checks.
+	sw.WriteBit(1) // delta_pic_order_always_zero_flag
+	sw.WriteSE(0)  // offset_for_non_ref_pic
+	sw.WriteSE(0)  // offset_for_top_to_bottom_field
+	sw.WriteUE(0)  // num_ref_frames_in_pic_order_cnt_cycle
+	sw.WriteUE(1)  // max_num_ref_frames
+	sw.WriteBit(0) // gaps_in_frame_num_value_allowed_flag
+	sw.WriteUE(0)  // pic_width_in_mbs_minus1
+	sw.WriteUE(0)  // pic_height_in_map_units_minus1
+	sw.WriteBit(1) // frame_mbs_only_flag
+	sw.WriteBit(0) // direct_8x8_inference_flag
+	sw.WriteBit(0) // frame_cropping_flag
+	sw.WriteBit(0) // vui_parameters_present_flag
+	sw.WriteBit(1) // rbsp_stop_one_bit
 	sw.AlignToByte()
 	var buf bytes.Buffer
 	if err := WriteNALU(&buf, 7, 3, sw.Bytes()); err != nil {
@@ -250,7 +256,7 @@ func TestLastFrameState_PocType2Rejected(t *testing.T) {
 	}
 	_, _, err := LastFrameState(buf.Bytes())
 	if err == nil {
-		t.Fatal("expected error for pic_order_cnt_type=2")
+		t.Fatal("expected error for pic_order_cnt_type=1")
 	}
 }
 

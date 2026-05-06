@@ -426,11 +426,11 @@ func TestEncodePSkipSliceCABACNonDefaultSPS(t *testing.T) {
 	}
 }
 
-// TestEncodePSkipSliceErrorPOCType verifies that POC type != 0 is rejected.
+// TestEncodePSkipSliceErrorPOCType verifies that POC type 1 is rejected
+// (only types 0 and 2 are supported).
 func TestEncodePSkipSliceErrorPOCType(t *testing.T) {
-	// Create an SPS with pic_order_cnt_type = 2
 	sps := &avc.SPS{
-		PicOrderCntType:  2,
+		PicOrderCntType:  1,
 		FrameMbsOnlyFlag: true,
 		Width:            32,
 		Height:           32,
@@ -442,6 +442,6 @@ func TestEncodePSkipSliceErrorPOCType(t *testing.T) {
 
 	_, err := EncodePSkipSlice(sps, pps, 1, 2, 0)
 	if err == nil {
-		t.Fatal("expected error for POC type 2, got nil")
+		t.Fatal("expected error for POC type 1, got nil")
 	}
 }

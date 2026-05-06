@@ -31,7 +31,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 #### Stream continuation
 - `encode.AppendPSkipFrames(annexB, count)` extends an existing bitstream with N empty P_Skip frames, automatically continuing the source's `frame_num` and `pic_order_cnt_lsb` progression. One-call helper for the common "freeze last frame" use case.
 - `encode.LastFrameState(annexB)` returns the `(frame_num, pic_order_cnt_lsb)` of the last slice in a bitstream — for callers that need to pick continuation values themselves.
+- `encode.GenerateIDRWithSPSPPS(p, sps, pps, plane, idrPicID)` emits an IDR slice that references foreign SPS/PPS (POC type 0 or 2, arbitrary `pic_init_qp_minus26`, arbitrary `pps_id`). Used for splicing a fresh IDR onto an arbitrary upstream encoder's output.
+- Support for `pic_order_cnt_type=2` in `EncodePSkipSlice` and `LastFrameState` (covers x264's default for streams without B-frames; `pic_order_cnt_lsb` is omitted from the slice header for type 2).
+- Support for source PPS with `weighted_pred_flag=1`: P_Skip slice now overrides `num_ref_idx_l0_active_minus1=0` and emits a single zero-weights `pred_weight_table()` entry.
+- New `cmd/hi264-mp4-extend` CLI: extends a fragmented MP4 (CMAF) media segment with N empty frames — either P_Skip copies (a freeze) or a black IDR + P_Skip tail. Output is a single fragment; concatenate with the input init segment to play (`cat init.mp4 out.m4s | ffplay -i -`).
 - `tools/verify_pskip_extend.sh` and `tools/extend_pskip` for ffmpeg/ffprobe-based verification of stream extension across CAVLC, CABAC, and a real-world x264 B-frame source.
+- `testdata/frag1s.mp4`, `testdata/init.mp4`, `testdata/seg1s.m4s` — 1-second fmp4 fixture (1280×720, x264 Main, CABAC) plus its split init/media parts.
 
 #### PNG/JPEG image backgrounds
 - `-gi photo.png` / `-gi photo.jpg` for using PNG/JPEG images as backgrounds
@@ -58,6 +63,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Internal: `BuildFrame` rewired through PlaneGrid; all CLI output paths use PlaneGrid as intermediate
 
 ### Fixed
+- Slice header CABAC alignment: only emit `cabac_alignment_one_bit` while the byte is unaligned (per spec 7.3.2.8). The previous "always write 1 + zeros" path was lenient with type-0 IDR / non-deblock-control headers (some decoders don't validate the bit values), but corrupted CABAC parsing for headers that already ended on a byte boundary — surfaced when extending streams with foreign SPS/PPS using `pic_order_cnt_type=2`.
 - Signal proper H.264 level depending on resolution, fps, and bitrate
 - CAVLC level VLC encoding for large coefficients: fix overflow when `levelCode >> suffixLength >= 15`, and support prefix ≥ 16 for `suffixLength == 0` (needed at QP=0)
 - Encoder reconstruction order: inverse Hadamard before dequant (matching H.264 spec and decoder), eliminating rounding errors for non-uniform DC values
