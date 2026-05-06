@@ -350,11 +350,33 @@ idr, _ = encode.GenerateIDRFromPlane(p, plane, 0)
 > `io.Writer` in a `bufio.Writer` to avoid a syscall per frame. This can
 > reduce write overhead by ~87% for multi-frame sequences.
 
-### Appending frames to an existing bitstream
+### Extending an existing bitstream with empty frames
 
-This example parses SPS/PPS from an existing H.264 bitstream, then appends
-a black IDR frame and a P\_Skip frame that are compatible with the original
-parameter sets:
+Two flows, picked by whether you want to keep decoding from the source's
+last picture or restart from a new IDR.
+
+#### One-call continuation (no new IDR)
+
+`AppendPSkipFrames` adds N empty P\_Skip frames to an existing stream,
+continuing its `frame_num` and `pic_order_cnt_lsb` progression. The
+appended frames copy pixels from the source's last reference picture, so
+the visible result is a freeze on the last frame.
+
+```go
+import "github.com/Eyevinn/hi264/pkg/encode"
+
+extended, err := encode.AppendPSkipFrames(existingStream, 30) // freeze for 30 frames
+```
+
+Requires the source to have at least one SPS, PPS, and slice, and the SPS
+to use `pic_order_cnt_type=0`.
+
+#### Append a fresh IDR, then empty P\_Skip frames
+
+To restart decoding from a new full picture (e.g. splice in a black tail
+or a slate), encode an IDR with `GenerateIDR` and then add P\_Skip frames
+that copy from it. The IDR resets POC to 0, so the P\_Skips use
+`pic_order_cnt_lsb = 2*frame_num`:
 
 ```go
 import (
@@ -363,7 +385,7 @@ import (
     "github.com/Eyevinn/hi264/pkg/yuv"
 )
 
-// Parse parameter sets from the existing bitstream
+// Parse SPS/PPS from the existing stream so the new IDR is compatible.
 nalus := avc.ExtractNalusFromByteStream(existingStream)
 spsMap := make(map[uint32]*avc.SPS)
 var sps *avc.SPS
@@ -372,41 +394,49 @@ for _, nalu := range nalus {
     if len(nalu) < 1 {
         continue
     }
-    naluType := nalu[0] & 0x1f
-    switch naluType {
-    case 7: // SPS
+    switch avc.GetNaluType(nalu[0]) {
+    case avc.NALU_SPS:
         sps, _ = avc.ParseSPSNALUnit(nalu, true)
-        spsMap[sps.ParameterID] = sps
-    case 8: // PPS
+        spsMap[uint32(sps.ParameterID)] = sps
+    case avc.NALU_PPS:
         pps, _ = avc.ParsePPSNALUnit(nalu, spsMap)
     }
 }
 
-// Create a single-color black grid matching the frame dimensions
-w := int(sps.Width)
-h := int(sps.Height)
-blackY := uint8(16)  // limited range black
+// Encode a black IDR matching the source dimensions and entropy mode.
+w, h := int(sps.Width), int(sps.Height)
+blackY := uint8(16) // limited range
 if sps.VUI != nil && sps.VUI.VideoFullRangeFlag {
-    blackY = 0       // full range black
+    blackY = 0
 }
 grid, colors := yuv.SolidGrid(w, h, yuv.Color{Y: blackY, Cb: 128, Cr: 128})
+p := encode.EncodeParams{Width: w, Height: h, QP: 26, CABAC: pps.EntropyCodingModeFlag}
+idr, _ := encode.GenerateIDR(p, grid, colors, 0)
 
-// Encode a black IDR frame using parameters matching the existing SPS/PPS
-p := encode.EncodeParams{
-    Width:  w,
-    Height: h,
-    QP:     26,
-    CABAC:  pps.EntropyCodingModeFlag,
+// Append IDR + 30 P_Skip copies. After the IDR, POC starts at 0.
+out := append(existingStream, idr...)
+for i := uint32(1); i <= 30; i++ {
+    pSkip, _ := encode.EncodePSkipSlice(sps, pps, i, 2*i, 0)
+    out = append(out, pSkip...)
 }
-idrSlice, _ := encode.GenerateIDR(p, grid, colors, 0)
-
-// Encode a P_Skip slice (copies the IDR frame unchanged)
-pSkipSlice, _ := encode.EncodePSkipSlice(sps, pps, 1, 0)
-
-// Append to the original stream
-stream := append(existingStream, idrSlice...)
-stream = append(stream, pSkipSlice...)
 ```
+
+#### Lower-level building blocks
+
+`AppendPSkipFrames` is built on two primitives, useful when you need
+finer control (custom frame_num strides, custom deblocking, splicing
+multiple sources):
+
+- `LastFrameState(stream) → (frameNum, picOrderCntLsb, err)` — read the
+  last slice's identifiers from a bitstream.
+- `EncodePSkipSlice(sps, pps, frameNum, picOrderCntLsb, disableDeblock)`
+  — write one empty P\_Skip slice with the given header values.
+  picOrderCntLsb is masked to the SPS-defined width, so wrap-around is
+  handled by the decoder.
+
+Limitations: `pic_order_cnt_type=0` only (types 1 and 2 unsupported);
+PPS settings that require `pred_weight_table()` (e.g.
+`weighted_pred_flag=1`) are out of scope.
 
 ## Architecture
 

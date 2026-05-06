@@ -58,7 +58,7 @@ func TestEncodePSkipSliceRoundTrip(t *testing.T) {
 	}
 
 	// Encode P_Skip using the standalone function
-	pSkipSlice, err := EncodePSkipSlice(sps, pps, 1, 1)
+	pSkipSlice, err := EncodePSkipSlice(sps, pps, 1, 2, 1)
 	if err != nil {
 		t.Fatalf("EncodePSkipSlice: %v", err)
 	}
@@ -222,7 +222,7 @@ func TestEncodePSkipSliceNonDefaultSPS(t *testing.T) {
 	}
 
 	// Encode P_Skip with non-default SPS
-	pSkipSlice, err := EncodePSkipSlice(sps, pps, 1, 1)
+	pSkipSlice, err := EncodePSkipSlice(sps, pps, 1, 2, 1)
 	if err != nil {
 		t.Fatalf("EncodePSkipSlice: %v", err)
 	}
@@ -306,7 +306,7 @@ func TestEncodePSkipSliceCABACRoundTrip(t *testing.T) {
 	}
 
 	// Encode P_Skip using CABAC
-	pSkipSlice, err := EncodePSkipSlice(sps, pps, 1, 1)
+	pSkipSlice, err := EncodePSkipSlice(sps, pps, 1, 2, 1)
 	if err != nil {
 		t.Fatalf("EncodePSkipSlice CABAC: %v", err)
 	}
@@ -404,7 +404,7 @@ func TestEncodePSkipSliceCABACNonDefaultSPS(t *testing.T) {
 	}
 
 	// Encode P_Skip with CABAC + non-default SPS
-	pSkipSlice, err := EncodePSkipSlice(sps, pps, 1, 1)
+	pSkipSlice, err := EncodePSkipSlice(sps, pps, 1, 2, 1)
 	if err != nil {
 		t.Fatalf("EncodePSkipSlice CABAC: %v", err)
 	}
@@ -440,7 +440,7 @@ func TestEncodePSkipSliceErrorPOCType(t *testing.T) {
 		DeblockingFilterControlPresentFlag: true,
 	}
 
-	_, err := EncodePSkipSlice(sps, pps, 1, 0)
+	_, err := EncodePSkipSlice(sps, pps, 1, 2, 0)
 	if err == nil {
 		t.Fatal("expected error for POC type 2, got nil")
 	}

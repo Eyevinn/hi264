@@ -137,5 +137,7 @@ func GeneratePSkip(p EncodeParams, frameNum uint32) ([]byte, error) {
 		EntropyCodingModeFlag:              p.CABAC,
 		PicInitQpMinus26:                   p.qp() - 26,
 	}
-	return EncodePSkipSlice(sps, pps, frameNum, p.DisableDeblock)
+	// GeneratePSkip is meant for self-generated streams that start fresh
+	// from an IDR (POC reset), so picOrderCntLsb = 2*frame_num is correct.
+	return EncodePSkipSlice(sps, pps, frameNum, frameNum*2, p.DisableDeblock)
 }

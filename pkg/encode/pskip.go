@@ -12,11 +12,18 @@ import (
 
 // EncodePSkipSlice encodes a P_Skip slice (all MBs skip, copying from reference)
 // using parameters from parsed SPS and PPS structures.
+//
 // Supports both CAVLC and CABAC entropy coding based on PPS.EntropyCodingModeFlag.
-// frameNum is the frame_num value for this slice.
+// frameNum and picOrderCntLsb are written verbatim into the slice header;
+// picOrderCntLsb is masked to the SPS-defined width
+// (log2_max_pic_order_cnt_lsb_minus4 + 4 bits). When extending an existing
+// bitstream, use LastFrameState (or AppendPSkipFrames as a one-shot helper)
+// to obtain matching values.
+//
 // disableDeblock: 0=enable (with offsets=0), 1=disable, 2=disable across slices.
 // Returns an Annex-B framed non-IDR NALU (type=1, ref_idc=2).
-func EncodePSkipSlice(sps *avc.SPS, pps *avc.PPS, frameNum uint32, disableDeblock int) ([]byte, error) {
+func EncodePSkipSlice(sps *avc.SPS, pps *avc.PPS,
+	frameNum uint32, picOrderCntLsb uint32, disableDeblock int) ([]byte, error) {
 	// Validate: only POC type 0
 	if sps.PicOrderCntType != 0 {
 		return nil, fmt.Errorf("EncodePSkipSlice: pic_order_cnt_type=%d "+
@@ -32,15 +39,15 @@ func EncodePSkipSlice(sps *avc.SPS, pps *avc.PPS, frameNum uint32, disableDebloc
 	totalMBs := mbWidth * mbHeight
 
 	if pps.EntropyCodingModeFlag {
-		return encodePSkipSliceCABAC(sps, pps, frameNum, disableDeblock, totalMBs)
+		return encodePSkipSliceCABAC(sps, pps, frameNum, picOrderCntLsb, disableDeblock, totalMBs)
 	}
-	return encodePSkipSliceCAVLC(sps, pps, frameNum, disableDeblock, totalMBs)
+	return encodePSkipSliceCAVLC(sps, pps, frameNum, picOrderCntLsb, disableDeblock, totalMBs)
 }
 
 func encodePSkipSliceCAVLC(sps *avc.SPS, pps *avc.PPS,
-	frameNum uint32, disableDeblock int, totalMBs int) ([]byte, error) {
+	frameNum uint32, picOrderCntLsb uint32, disableDeblock int, totalMBs int) ([]byte, error) {
 	w := NewBitWriter()
-	WritePSliceHeader(w, frameNum, 0, disableDeblock,
+	WritePSliceHeader(w, frameNum, picOrderCntLsb, 0, disableDeblock,
 		uint32(sps.Log2MaxFrameNumMinus4),
 		uint32(sps.Log2MaxPicOrderCntLsbMinus4),
 		pps.PicParameterSetID,
@@ -65,12 +72,12 @@ func encodePSkipSliceCAVLC(sps *avc.SPS, pps *avc.PPS,
 }
 
 func encodePSkipSliceCABAC(sps *avc.SPS, pps *avc.PPS,
-	frameNum uint32, disableDeblock int, totalMBs int) ([]byte, error) {
+	frameNum uint32, picOrderCntLsb uint32, disableDeblock int, totalMBs int) ([]byte, error) {
 	const cabacInitIDC = 0
 
 	// Build slice header with CABAC alignment
 	headerW := NewBitWriter()
-	WritePSliceHeaderCABAC(headerW, frameNum, 0, disableDeblock,
+	WritePSliceHeaderCABAC(headerW, frameNum, picOrderCntLsb, 0, disableDeblock,
 		uint32(sps.Log2MaxFrameNumMinus4),
 		uint32(sps.Log2MaxPicOrderCntLsbMinus4),
 		pps.PicParameterSetID,

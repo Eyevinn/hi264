@@ -35,14 +35,16 @@ func WriteSliceHeader(w *BitWriter, qpDelta int32, disableDeblock int, idrPicID 
 }
 
 // WritePSliceHeader writes the slice header for a P-slice (non-IDR).
-// frameNum is the frame_num value (increments for each non-IDR frame).
+// frameNum is the frame_num value (increments for each reference frame).
+// picOrderCntLsb is the pic_order_cnt_lsb value, written using
+// log2MaxPicOrderCntLsbMinus4+4 bits (any high bits are masked off).
 // log2MaxFrameNumMinus4 must match the SPS value.
 // log2MaxPicOrderCntLsbMinus4 controls the POC LSB bit width (from SPS).
 // ppsID is the pic_parameter_set_id written in the slice header.
 // deblockControlPresent controls whether deblocking syntax is written (from PPS).
 // cabacInitIDC: when >= 0, write cabac_init_idc (0-2) for CABAC slices; -1 for CAVLC.
-func WritePSliceHeader(w *BitWriter, frameNum uint32, qpDelta int32,
-	disableDeblock int, log2MaxFrameNumMinus4 uint32,
+func WritePSliceHeader(w *BitWriter, frameNum uint32, picOrderCntLsb uint32,
+	qpDelta int32, disableDeblock int, log2MaxFrameNumMinus4 uint32,
 	log2MaxPicOrderCntLsbMinus4 uint32, ppsID uint32, deblockControlPresent bool,
 	cabacInitIDC int) {
 	// first_mb_in_slice = 0
@@ -54,8 +56,7 @@ func WritePSliceHeader(w *BitWriter, frameNum uint32, qpDelta int32,
 	// frame_num: u(log2_max_frame_num_minus4 + 4)
 	w.WriteBits(uint32(frameNum), int(log2MaxFrameNumMinus4+4))
 	// pic_order_cnt_lsb: u(log2_max_pic_order_cnt_lsb_minus4 + 4)
-	// Use frameNum*2 as POC (simple mapping)
-	w.WriteBits(frameNum*2, int(log2MaxPicOrderCntLsbMinus4+4))
+	w.WriteBits(picOrderCntLsb, int(log2MaxPicOrderCntLsbMinus4+4))
 	// num_ref_idx_active_override_flag = 0 (use PPS default)
 	w.WriteBit(0)
 	// ref_pic_list_modification_flag_l0 = 0 (no reordering)
@@ -84,11 +85,11 @@ func WritePSliceHeader(w *BitWriter, frameNum uint32, qpDelta int32,
 
 // WritePSliceHeaderCABAC writes a CABAC P-slice header with alignment bits.
 // cabacInitIDC is the cabac_init_idc value (0-2).
-func WritePSliceHeaderCABAC(w *BitWriter, frameNum uint32, qpDelta int32,
-	disableDeblock int, log2MaxFrameNumMinus4 uint32,
+func WritePSliceHeaderCABAC(w *BitWriter, frameNum uint32, picOrderCntLsb uint32,
+	qpDelta int32, disableDeblock int, log2MaxFrameNumMinus4 uint32,
 	log2MaxPicOrderCntLsbMinus4 uint32, ppsID uint32, deblockControlPresent bool,
 	cabacInitIDC int) {
-	WritePSliceHeader(w, frameNum, qpDelta, disableDeblock,
+	WritePSliceHeader(w, frameNum, picOrderCntLsb, qpDelta, disableDeblock,
 		log2MaxFrameNumMinus4, log2MaxPicOrderCntLsbMinus4,
 		ppsID, deblockControlPresent, cabacInitIDC)
 

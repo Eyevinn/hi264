@@ -120,7 +120,9 @@ func (e *FrameEncoder) EncodePSkipSlice(frameNum uint32) ([]byte, error) {
 		EntropyCodingModeFlag:              e.CABAC,
 		PicInitQpMinus26:                   e.QP - 26,
 	}
-	return EncodePSkipSlice(sps, pps, frameNum, e.DisableDeblock)
+	// FrameEncoder controls both ends of its stream (IDR resets POC each
+	// time), so picOrderCntLsb = 2*frame_num is correct here.
+	return EncodePSkipSlice(sps, pps, frameNum, frameNum*2, e.DisableDeblock)
 }
 
 func (e *FrameEncoder) encodeSliceCAVLC(idrPicID uint32) ([]byte, error) {
