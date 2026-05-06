@@ -8,24 +8,59 @@
 [![Badge OSC](https://img.shields.io/badge/Evaluate-24243B?style=for-the-badge&logo=data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjQiIGhlaWdodD0iMjQiIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPGNpcmNsZSBjeD0iMTIiIGN5PSIxMiIgcj0iMTIiIGZpbGw9InVybCgjcGFpbnQwX2xpbmVhcl8yODIxXzMxNjcyKSIvPgo8Y2lyY2xlIGN4PSIxMiIgY3k9IjEyIiByPSI3IiBzdHJva2U9ImJsYWNrIiBzdHJva2Utd2lkdGg9IjIiLz4KPGRlZnM%2BCjxsaW5lYXJHcmFkaWVudCBpZD0icGFpbnQwX2xpbmVhcl8yODIxXzMxNjcyIiB4MT0iMTIiIHkxPSIwIiB4Mj0iMTIiIHkyPSIyNCIgZ3JhZGllbnRVbml0cz0idXNlclNwYWNlT25Vc2UiPgo8c3RvcCBzdG9wLWNvbG9yPSIjQzE4M0ZGIi8%2BCjxzdG9wIG9mZnNldD0iMSIgc3RvcC1jb2xvcj0iIzREQzlGRiIvPgo8L2xpbmVhckdyYWRpZW50Pgo8L2RlZnM%2BCjwvc3ZnPgo%3D)](https://app.osaas.io/browse/eyevinn-mp4ff)
 
 ## Pure Go H.264/AVC IDR Decoder & Bitstream Generator
-A pure Go H.264/AVC decoder for IDR (and P_Skip) frames with both CABAC and CAVLC
-entropy coding, plus a bitstream generator for producing valid H.264 test
-content with IDR and empty P-frames from grid patterns at 16x16 or 8x8 block
-granularity. It can also be used to extend video with extra frames without a
-change of SPS/PPS.
 
-This is **not** a general-purpose video encoder — it does not accept arbitrary
-pixel input or perform motion estimation. The encoder produces I_16x16 DC
-prediction frames from grid patterns (one color per block), with proper AC
-residual encoding when 8x8 blocks create step patterns at 4x4 sub-block
-boundaries. This is useful for generating test bitstreams, color bars, frame
-counters, and reference content for decoder verification.
+A focused H.264/AVC toolkit written in pure Go, designed around three things
+people actually need to do with H.264 streams in production code without
+pulling in a full encoder/decoder.
 
-All processing is currently 8-bit 4:2:0 only (no 10-bit or 4:2:2/4:4:4 support).
+### What it's for
 
-Pixel-perfect match with FFmpeg IDR decoding across 41+ golden test cases covering varied
-content, profiles, QP ranges, scaling matrices, deblocking, resolutions, and
-both entropy coding modes.
+**1. Seamlessly extend fMP4 fragments to a target duration.** Got a 1-second
+CMAF segment that should be 2 seconds? `hi264-mp4-extend` appends additional
+frames into the same fragment — either P\_Skip copies of the last reference
+picture (a freeze) or a black IDR followed by a P\_Skip tail. The appended
+slice headers reuse the source's SPS and PPS verbatim (POC type 0 or 2,
+weighted\_pred=1, custom `pic_init_qp_minus26`, arbitrary
+`log2_max_frame_num`), so the output decodes cleanly with no parameter-set
+shuffle. This is generally **not** possible with a normal encoder run, which
+would emit its own SPS/PPS and break splicing. See [Extending an existing
+bitstream with empty frames](#extending-an-existing-bitstream-with-empty-frames).
+
+**2. Make simple test content from scratch.** `hi264gen` produces valid
+H.264 (CAVLC or CABAC, Annex-B or fmp4) from grid patterns, color bars,
+frame counters, and timestamp overlays — no upstream encoder needed. Tune
+the bitrate with `-kbps` (filler-NALU padding) or `-bpp`, set frame rate,
+fragment duration, GOP structure (IDR-only, IDR + P\_Skip), color space, and
+range. Useful for building DASH/HLS test fixtures, exercising decoders, and
+reproducing edge cases where you need to know exactly which bytes are on
+the wire.
+
+**3. Extract IDR frames as thumbnails.** `hi264dec` decodes IDR frames from
+raw `.264` Annex-B or `.mp4`/`.m4v` containers and writes them as PNG, JPEG,
+Y4M, or raw YUV. Pixel-perfect against FFmpeg across the supported feature
+set, so a pipeline that uses hi264 for IDR thumbnails matches what FFmpeg
+would have decoded. With `-n` you get N keyframes in one call.
+
+### Why pure Go
+
+The whole stack — decoder, encoder, CABAC/CAVLC engines, fragment
+manipulation — is pure Go, with [mp4ff](https://github.com/Eyevinn/mp4ff) as
+the only direct dependency for SPS/PPS/slice-header parsing and fragmented
+MP4 I/O. No cgo, no FFmpeg link-time dependency, no patent-encumbered
+encoder under the hood. Cross-compiles cleanly to anywhere Go runs.
+
+### Scope and constraints
+
+This is **not** a general-purpose video encoder — it does not accept
+arbitrary pixel input or perform motion estimation. The encoder produces
+I\_16x16 DC prediction frames from grid patterns (one color per 16×16 or
+8×8 block), with AC residual encoding for sub-block boundaries. The
+decoder handles IDR plus P\_Skip frames; full P/B-frame decoding is out
+of scope. All processing is 8-bit 4:2:0 only.
+
+Pixel-perfect match with FFmpeg IDR decoding across 41+ golden test cases
+covering varied content, profiles, QP ranges, scaling matrices,
+deblocking, resolutions, and both entropy coding modes.
 
 ## Build & Test
 
