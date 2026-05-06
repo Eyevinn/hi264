@@ -196,6 +196,10 @@ Never add a golden bitstream unless hi264dec output is identical to FFmpeg decod
 ```bash
 # Verify hi264gen grid-only output matches FFmpeg decode across all test patterns
 bash tools/verify_hi264gen.sh
+
+# Verify EncodePSkipSliceAt/LastFrameState extends a stream cleanly
+# (ffmpeg reports no errors, frame count matches, POC stays monotonic)
+bash tools/verify_pskip_extend.sh
 ```
 
 ### Debugging

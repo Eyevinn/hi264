@@ -28,6 +28,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 #### PSNR tool
 - New `cmd/rawpsnr` CLI: compares two raw YUV420 files and reports overall, per-component, and (with `-per-mb`) per-16×16-macroblock PSNR; optional `-csv` export
 
+#### Stream continuation
+- `encode.AppendPSkipFrames(annexB, count)` extends an existing bitstream with N empty P_Skip frames, automatically continuing the source's `frame_num` and `pic_order_cnt_lsb` progression. One-call helper for the common "freeze last frame" use case.
+- `encode.LastFrameState(annexB)` returns the `(frame_num, pic_order_cnt_lsb)` of the last slice in a bitstream — for callers that need to pick continuation values themselves.
+- `tools/verify_pskip_extend.sh` and `tools/extend_pskip` for ffmpeg/ffprobe-based verification of stream extension across CAVLC, CABAC, and a real-world x264 B-frame source.
+
 #### PNG/JPEG image backgrounds
 - `-gi photo.png` / `-gi photo.jpg` for using PNG/JPEG images as backgrounds
   - Without `-w`/`-h`: uses native image dimensions at 1:1 block sampling
@@ -41,6 +46,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `pkg/yuv.TilePlaneGrid()` for tiling a PlaneGrid to larger dimensions
 
 ### Changed
+- **Breaking:** `encode.EncodePSkipSlice` now takes an explicit `picOrderCntLsb` parameter (`func(sps, pps, frameNum, picOrderCntLsb, disableDeblock)`); the previous 4-arg form silently derived `picOrderCntLsb = 2*frame_num`, which produced silently-broken streams when extending arbitrary upstream encoders. Use `AppendPSkipFrames` for the common case, or pass `2*frameNum` explicitly when starting fresh from an IDR.
 - **Breaking:** hi264gen deblocking filter is off by default; `-no-deblock` is replaced by `-use-deblock` to opt back in. Block-flat encoder output gets smoothed across intentional boundaries by the loop filter, costing 6–14 dB PSNR depending on QP.
 - Minimal Go version 1.24
 - Ran `go fix` to modernize the code
