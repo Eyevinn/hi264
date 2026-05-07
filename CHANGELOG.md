@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-05-07
+
 ### Added
 
 #### 8x8 block granularity
@@ -176,6 +178,7 @@ Typical use cases include:
 - 41+ golden decoder test cases with pixel-perfect FFmpeg match
 - 12+ encoder verification tests against FFmpeg decode
 
-[Unreleased]: https://github.com/Eyevinn/hi264/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/Eyevinn/hi264/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/Eyevinn/hi264/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/Eyevinn/hi264/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/Eyevinn/hi264/releases/tag/v0.8.0
