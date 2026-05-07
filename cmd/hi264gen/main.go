@@ -43,6 +43,11 @@ const appName = "hi264gen"
 
 var usg = `%s - generate H.264 bitstreams or raw images from grid patterns.
 
+Each character in the input grid maps to one block of flat color, encoded as
+I_16x16 with DC prediction. Block size is 16x16 by default; pass -8x8 (or use
+@8x8 in a .gridimg) for 8x8 input granularity (4 characters per macroblock,
+finer detail, double-res text glyphs).
+
 Usage:
 
   %s -gi pattern.gridimg -o output.264
@@ -50,6 +55,7 @@ Usage:
   %s -gi pattern.gridimg -w 176 -h 80 -n 10 -text "%%03d" -o output.264
   %s -w 176 -h 80 -n 10 -text "%%03d" -o output.264
   %s -smpte -w 320 -h 240 -n 100 -text "%%03d" -f 264 -o - | ffplay -i -
+  %s -gi photo.jpg -8x8 -o output.264                                  # 8x8 input granularity
 
 Output format is detected from the file extension, or set explicitly with -f:
   264        H.264 Annex-B bitstream (SPS+PPS once, then N slices)
@@ -137,11 +143,12 @@ func parseOptions(fs *flag.FlagSet, args []string) (*options, error) {
 	fs.IntVar(&opts.fragDur, "frag-dur", 25, "fragment duration in frames for MP4 output")
 	fs.StringVar(&opts.colorspace, "colorspace", "bt601", "color space (bt601, bt709, bt2020)")
 	fs.BoolVar(&opts.fullRange, "full-range", false, "use full-range YCbCr (0-255)")
-	fs.BoolVar(&opts.use8x8, "8x8", false, "use 8x8 block resolution (double-res text glyphs)")
+	fs.BoolVar(&opts.use8x8, "8x8", false,
+		"8x8 input block granularity (each grid char = 8x8 block, finer detail, double-res text)")
 	fs.StringVar(&opts.cpuProfile, "cpuprofile", "", "write CPU profile to file")
 	fs.StringVar(&opts.output, "o", "", "output file (required)")
 	fs.Usage = func() {
-		fmt.Fprintf(os.Stderr, usg, appName, appName, appName, appName, appName, appName)
+		fmt.Fprintf(os.Stderr, usg, appName, appName, appName, appName, appName, appName, appName)
 		fs.PrintDefaults()
 	}
 	err := fs.Parse(args[1:])

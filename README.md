@@ -28,12 +28,16 @@ bitstream with empty frames](#extending-an-existing-bitstream-with-empty-frames)
 
 **2. Make simple test content from scratch.** `hi264gen` produces valid
 H.264 (CAVLC or CABAC, Annex-B or fmp4) from grid patterns, color bars,
-frame counters, and timestamp overlays — no upstream encoder needed. Tune
-the bitrate with `-kbps` (filler-NALU padding) or `-bpp`, set frame rate,
-fragment duration, GOP structure (IDR-only, IDR + P\_Skip), color space, and
-range. Useful for building DASH/HLS test fixtures, exercising decoders, and
-reproducing edge cases where you need to know exactly which bytes are on
-the wire.
+frame counters, and timestamp overlays — no upstream encoder needed. Each
+input character maps to one block of flat color; block granularity is
+either 16×16 macroblocks (default) or 8×8 sub-blocks (`-8x8` flag or
+`@8x8` directive — 4 characters per macroblock, finer spatial detail with
+proper AC residual encoding at the quadrant boundaries). Tune the bitrate
+with `-kbps` (filler-NALU padding) or `-bpp`, set frame rate, fragment
+duration, GOP structure (IDR-only, IDR + P\_Skip), color space, and
+range. Useful for building DASH/HLS test fixtures, exercising decoders,
+and reproducing edge cases where you need to know exactly which bytes are
+on the wire.
 
 **3. Extract IDR frames as thumbnails.** `hi264dec` decodes IDR frames from
 raw `.264` Annex-B or `.mp4`/`.m4v` containers and writes them as PNG, JPEG,
