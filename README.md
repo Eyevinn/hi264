@@ -10,8 +10,8 @@
 ## Pure Go H.264/AVC IDR Decoder & Bitstream Generator
 
 A focused H.264/AVC toolkit written in pure Go, designed around three things
-people actually need to do with H.264 streams in production code without
-pulling in a full encoder/decoder.
+people actually need to do with H.264 streams in production and test
+pipelines without pulling in a full encoder/decoder.
 
 ### What it's for
 
@@ -234,6 +234,50 @@ Flags:
 
 Text supports **A-Z 0-9** and punctuation **! # % + - . / : = ? [ ] _ ( )** plus space.
 Lowercase input is auto-uppercased.
+
+### Text overlays: frame counters and timestamps
+
+The `-text` flag accepts a printf-style pattern that is re-evaluated for each
+frame. Frame index and elapsed time are both derived from the current frame
+number and `-fps`, so the same patterns work for `.264`, `.mp4`, `.y4m`,
+`.yuv`, `.png`, and `.jpg` output.
+
+| Specifier | Expansion | Example (frame 76 at 25 fps) |
+|---|---|---|
+| `%d` | Frame number, no padding | `76` |
+| `%Nd` | Frame number, space-padded to N digits (e.g. `%5d`) | `   76` |
+| `%0Nd` | Frame number, zero-padded to N digits (e.g. `%04d`) | `0076` |
+| `%hh` | Hours, 2 digits | `00` |
+| `%mm` | Minutes within hour, 2 digits | `00` |
+| `%ss` | Seconds within minute, 2 digits | `03` |
+| `%ff` | Frame within current second, 2 digits | `01` |
+| `%ms` | Milliseconds within current second, 3 digits | `040` |
+| `%%` | Literal `%` | `%` |
+| `\n` | Newline (multi-line overlay) | — |
+
+Common patterns:
+
+```bash
+# Plain frame counter
+go run ./cmd/hi264gen -w 320 -h 240 -n 100 -text "%03d" -o counter.mp4
+
+# SMPTE timecode HH:MM:SS:FF (frame-accurate)
+go run ./cmd/hi264gen -smpte -w 512 -h 240 -n 250 -fps 25 -text "%hh:%mm:%ss:%ff" -o tc.mp4
+
+# Wall-clock-style timestamp with milliseconds
+go run ./cmd/hi264gen -smpte -w 640 -h 360 -n 250 -fps 25 -text "%hh:%mm:%ss.%ms" -o tc_ms.mp4
+
+# Two-line overlay: counter on top, timestamp below
+go run ./cmd/hi264gen -smpte -w 320 -h 240 -n 75 -fps 25 -text '%05d\n%mm:%ss.%ff' -o stacked.mp4
+
+# Combine static text with a counter (lowercase auto-uppercased)
+go run ./cmd/hi264gen -w 320 -h 240 -n 100 -text "frame %04d" -o labeled.mp4
+```
+
+The timestamp specifiers always reflect frame-derived time (`frame_num / fps`),
+not wall-clock — so output is bit-reproducible and decoded frames carry an
+unambiguous identifier for ABR/HLS/DASH test playback, segment alignment
+checks, and reproducing decoder edge cases.
 
 ### Deblocking filter
 
