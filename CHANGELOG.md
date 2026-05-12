@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Documentation
+- Document `hi264gen -text` format specifiers (`%d`/`%Nd`/`%0Nd`, `%hh`/`%mm`/`%ss`/`%ff`/`%ms`, `%%`, `\n`) in both the README and the CLI help text, with copy-pasteable examples for counters, SMPTE timecode, millisecond timestamps, and multi-line overlays.
+
 ## [0.10.0] - 2026-05-07
 
 ### Added

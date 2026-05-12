@@ -68,6 +68,21 @@ Output format is detected from the file extension, or set explicitly with -f:
 
 Use -o - to write to stdout (requires -f to set the format).
 
+Text overlay format specifiers (for -text, evaluated per frame using -fps):
+  %%d        frame number (no padding)
+  %%Nd       frame number space-padded to N digits (e.g. %%3d)
+  %%0Nd      frame number zero-padded to N digits (e.g. %%03d)
+  %%hh       hours (2 digits)
+  %%mm       minutes within hour (2 digits)
+  %%ss       seconds within minute (2 digits)
+  %%ff       frame within current second (2 digits)
+  %%ms       milliseconds within current second (3 digits)
+  %%%%        literal %%
+  \n        newline (for multi-line overlays)
+
+Examples: -text "%%03d", -text "%%mm:%%ss.%%ff", -text "%%hh:%%mm:%%ss.%%ms",
+          -text "FRAME %%05d\n%%mm:%%ss.%%ff"
+
 Options:
 `
 
@@ -127,7 +142,9 @@ func parseOptions(fs *flag.FlagSet, args []string) (*options, error) {
 	fs.IntVar(&opts.height, "h", 0, "frame height in pixels (must be even; default: grid-derived)")
 	fs.IntVar(&opts.numFrames, "n", 1, "number of frames")
 	fs.StringVar(&opts.text, "text", "",
-		"text overlay pattern (e.g. \"%03d\"); A-Z 0-9 !#%+-./:[]=?_() (lowercase auto-uppercased)")
+		"text overlay pattern, e.g. \"%03d\" (frame#) or \"%mm:%ss.%ff\" (timestamp); "+
+			"specifiers: %d/%Nd/%0Nd %hh %mm %ss %ff %ms %%; "+
+			"chars: A-Z 0-9 !#%+-./:[]=?_() (lowercase auto-uppercased)")
 	fs.IntVar(&opts.textScale, "text-scale", 0, "text scale factor (0 = auto)")
 	fs.StringVar(&opts.textBg, "text-bg", "", "text background box color (R,G,B)")
 	fs.StringVar(&opts.fg, "fg", "255,255,255", "foreground RGB color for text (R,G,B)")
