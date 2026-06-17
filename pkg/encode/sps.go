@@ -8,7 +8,9 @@ import (
 // width and height are in pixels (must be even; non-16-multiples use frame cropping).
 // maxRef is the max_num_ref_frames value (0 for IDR-only, 1+ for P-frames).
 // level is the level_idc value (e.g. 30 for Level 3.0); use ChooseLevel to compute.
-func EncodeSPS(width, height, maxRef, level int, cs yuv.ColorSpace, rng yuv.Range) []byte {
+// picStructPresent sets vui pic_struct_present_flag; it must be true to attach
+// pic_timing SEI clock timestamps (see GeneratePicTimingSEI).
+func EncodeSPS(width, height, maxRef, level int, cs yuv.ColorSpace, rng yuv.Range, picStructPresent bool) []byte {
 	w := NewBitWriter()
 
 	mbWidth := (width + 15) / 16
@@ -56,7 +58,7 @@ func EncodeSPS(width, height, maxRef, level int, cs yuv.ColorSpace, rng yuv.Rang
 	}
 
 	// vui_parameters_present_flag
-	writeVUI(w, cs, rng)
+	writeVUI(w, cs, rng, picStructPresent)
 
 	// RBSP trailing bits
 	w.WriteBit(1) // rbsp_stop_one_bit
@@ -70,7 +72,9 @@ func EncodeSPS(width, height, maxRef, level int, cs yuv.ColorSpace, rng yuv.Rang
 // width and height are in pixels (must be even; non-16-multiples use frame cropping).
 // maxRef is the max_num_ref_frames value (0 for IDR-only, 1+ for P-frames).
 // level is the level_idc value (e.g. 31 for Level 3.1); use ChooseLevel to compute.
-func EncodeSPSMain(width, height, maxRef, level int, cs yuv.ColorSpace, rng yuv.Range) []byte {
+// picStructPresent sets vui pic_struct_present_flag; it must be true to attach
+// pic_timing SEI clock timestamps (see GeneratePicTimingSEI).
+func EncodeSPSMain(width, height, maxRef, level int, cs yuv.ColorSpace, rng yuv.Range, picStructPresent bool) []byte {
 	w := NewBitWriter()
 
 	mbWidth := (width + 15) / 16
@@ -117,7 +121,7 @@ func EncodeSPSMain(width, height, maxRef, level int, cs yuv.ColorSpace, rng yuv.
 	}
 
 	// vui_parameters_present_flag
-	writeVUI(w, cs, rng)
+	writeVUI(w, cs, rng, picStructPresent)
 
 	// RBSP trailing bits
 	w.WriteBit(1) // rbsp_stop_one_bit
@@ -127,10 +131,13 @@ func EncodeSPSMain(width, height, maxRef, level int, cs yuv.ColorSpace, rng yuv.
 }
 
 // writeVUI writes VUI parameters to the SPS bitstream.
-// When cs is BT601 and rng is LimitedRange (the defaults), no VUI is written
-// to maintain backward compatibility.
-func writeVUI(w *BitWriter, cs yuv.ColorSpace, rng yuv.Range) {
-	if cs == yuv.BT601 && rng == yuv.LimitedRange {
+// VUI is emitted when a non-default color space/range needs signaling, or when
+// picStructPresent is requested (required for pic_timing SEI clock timestamps).
+// For the default BT601/LimitedRange and picStructPresent=false, no VUI is
+// written, preserving backward compatibility.
+func writeVUI(w *BitWriter, cs yuv.ColorSpace, rng yuv.Range, picStructPresent bool) {
+	needColor := cs != yuv.BT601 || rng != yuv.LimitedRange
+	if !needColor && !picStructPresent {
 		w.WriteBit(0) // vui_parameters_present_flag = 0
 		return
 	}
@@ -143,24 +150,29 @@ func writeVUI(w *BitWriter, cs yuv.ColorSpace, rng yuv.Range) {
 	// overscan_info_present_flag = 0
 	w.WriteBit(0)
 
-	// video_signal_type_present_flag = 1
-	w.WriteBit(1)
-	// video_format = 5 (unspecified)
-	w.WriteBits(5, 3)
-	// video_full_range_flag
-	if rng == yuv.FullRange {
+	if needColor {
+		// video_signal_type_present_flag = 1
 		w.WriteBit(1)
+		// video_format = 5 (unspecified)
+		w.WriteBits(5, 3)
+		// video_full_range_flag
+		if rng == yuv.FullRange {
+			w.WriteBit(1)
+		} else {
+			w.WriteBit(0)
+		}
+		// colour_description_present_flag = 1
+		w.WriteBit(1)
+		// colour_primaries
+		w.WriteBits(uint32(cs.ColourPrimaries()), 8)
+		// transfer_characteristics
+		w.WriteBits(uint32(cs.TransferCharacteristics()), 8)
+		// matrix_coefficients
+		w.WriteBits(uint32(cs.MatrixCoefficients()), 8)
 	} else {
+		// video_signal_type_present_flag = 0
 		w.WriteBit(0)
 	}
-	// colour_description_present_flag = 1
-	w.WriteBit(1)
-	// colour_primaries
-	w.WriteBits(uint32(cs.ColourPrimaries()), 8)
-	// transfer_characteristics
-	w.WriteBits(uint32(cs.TransferCharacteristics()), 8)
-	// matrix_coefficients
-	w.WriteBits(uint32(cs.MatrixCoefficients()), 8)
 
 	// chroma_loc_info_present_flag = 0
 	w.WriteBit(0)
@@ -176,8 +188,12 @@ func writeVUI(w *BitWriter, cs yuv.ColorSpace, rng yuv.Range) {
 
 	// Since neither nal_hrd nor vcl_hrd present, no low_delay_hrd_flag
 
-	// pic_struct_present_flag = 0
-	w.WriteBit(0)
+	// pic_struct_present_flag
+	if picStructPresent {
+		w.WriteBit(1)
+	} else {
+		w.WriteBit(0)
+	}
 
 	// bitstream_restriction_flag = 0
 	w.WriteBit(0)

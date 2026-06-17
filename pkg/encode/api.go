@@ -21,6 +21,9 @@ type EncodeParams struct {
 	Range          yuv.Range      // sample value range (default LimitedRange)
 	FPS            int            // frame rate (used for level selection, 0 = ignore MBPS)
 	Kbps           int            // bitrate in kbit/s (used for level selection, 0 = ignore bitrate)
+	// PicStructPresent sets vui pic_struct_present_flag in generated SPS. It
+	// must be true to attach pic_timing SEI clock timestamps (GeneratePicTimingSEI).
+	PicStructPresent bool
 }
 
 func (p *EncodeParams) validate() error {
@@ -51,9 +54,9 @@ func GenerateSPS(p EncodeParams) ([]byte, error) {
 	level := ChooseLevel(p.Width, p.Height, p.FPS, p.Kbps, p.CABAC)
 	var rbsp []byte
 	if p.CABAC {
-		rbsp = EncodeSPSMain(p.Width, p.Height, p.MaxRefFrames, level, p.ColorSpace, p.Range)
+		rbsp = EncodeSPSMain(p.Width, p.Height, p.MaxRefFrames, level, p.ColorSpace, p.Range, p.PicStructPresent)
 	} else {
-		rbsp = EncodeSPS(p.Width, p.Height, p.MaxRefFrames, level, p.ColorSpace, p.Range)
+		rbsp = EncodeSPS(p.Width, p.Height, p.MaxRefFrames, level, p.ColorSpace, p.Range, p.PicStructPresent)
 	}
 	var buf bytes.Buffer
 	if err := WriteNALU(&buf, 7, 3, rbsp); err != nil {

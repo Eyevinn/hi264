@@ -42,7 +42,7 @@ func TestEncodePSkipSliceRoundTrip(t *testing.T) {
 	buf.Write(idrSlice)
 
 	// Parse SPS/PPS back from generated bitstream
-	spsRBSP := EncodeSPS(32, 32, 1, 30, 0, 0)
+	spsRBSP := EncodeSPS(32, 32, 1, 30, 0, 0, false)
 	spsNalu := append([]byte{0x67}, spsRBSP...)
 	sps, err := avc.ParseSPSNALUnit(spsNalu, true)
 	if err != nil {
@@ -290,7 +290,7 @@ func TestEncodePSkipSliceCABACRoundTrip(t *testing.T) {
 	buf.Write(idrSlice)
 
 	// Parse SPS/PPS back for standalone EncodePSkipSlice
-	spsRBSP := EncodeSPSMain(32, 32, 1, 30, 0, 0)
+	spsRBSP := EncodeSPSMain(32, 32, 1, 30, 0, 0, false)
 	spsNalu := append([]byte{0x67}, spsRBSP...)
 	sps, err := avc.ParseSPSNALUnit(spsNalu, true)
 	if err != nil {

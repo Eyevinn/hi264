@@ -144,6 +144,18 @@ func extendSegment(initPath, inSegPath, outSegPath string, count uint32, blackID
 	cursorLsb := lastLsb
 	remaining := count
 
+	// If the source SPS signals pic_struct_present_flag (and no HRD), continue
+	// its pic_timing SEI timecodes onto the appended frames. HRD streams need
+	// CPB/DPB delay continuation, which is not yet supported, so SEIs are
+	// omitted there.
+	ptCfg := encode.PicTimingConfigFromSPS(sps)
+	emitPicTiming := ptCfg.PicStructPresent && ptCfg.HRD == nil
+	if ptCfg.PicStructPresent && ptCfg.HRD != nil {
+		fmt.Fprintln(os.Stderr, "note: source signals HRD parameters; "+
+			"pic_timing SEI omitted on appended frames (HRD timing not yet supported)")
+	}
+	timescale := mediaTimescale(initParsed.Init)
+
 	if blackIDR {
 		blackY := uint8(16)
 		if sps.VUI != nil && sps.VUI.VideoFullRangeFlag {
@@ -161,6 +173,11 @@ func extendSegment(initPath, inSegPath, outSegPath string, count uint32, blackID
 		}, sps, pps, plane, 0)
 		if err != nil {
 			return fmt.Errorf("encode black IDR: %w", err)
+		}
+		if emitPicTiming {
+			if idrAnnexB, err = prependPicTiming(ptCfg, idrAnnexB, nextDecodeTime, sampleDur, timescale); err != nil {
+				return fmt.Errorf("black IDR pic_timing: %w", err)
+			}
 		}
 		nalu := avc.ConvertByteStreamToNaluSample(idrAnnexB)
 		newSamples = append(newSamples, mp4.FullSample{
@@ -184,6 +201,12 @@ func extendSegment(initPath, inSegPath, outSegPath string, count uint32, blackID
 		pSkipAnnexB, err := encode.EncodePSkipSlice(sps, pps, fn, lsb, 0)
 		if err != nil {
 			return fmt.Errorf("encode P_Skip %d: %w", i, err)
+		}
+		if emitPicTiming {
+			pSkipAnnexB, err = prependPicTiming(ptCfg, pSkipAnnexB, nextDecodeTime, sampleDur, timescale)
+			if err != nil {
+				return fmt.Errorf("P_Skip %d pic_timing: %w", i, err)
+			}
 		}
 		nalu := avc.ConvertByteStreamToNaluSample(pSkipAnnexB)
 		newSamples = append(newSamples, mp4.FullSample{
@@ -353,4 +376,46 @@ func defaultTrackID(init *mp4.InitSegment) uint32 {
 		return t.Tkhd.TrackID
 	}
 	return 1
+}
+
+// mediaTimescale returns the media (mdhd) timescale of the first track, in
+// units per second. Used to map sample decode times to wall-clock timecodes.
+func mediaTimescale(init *mp4.InitSegment) uint32 {
+	if init == nil || init.Moov == nil {
+		return 0
+	}
+	for _, t := range init.Moov.Traks {
+		if t.Mdia != nil && t.Mdia.Mdhd != nil {
+			return t.Mdia.Mdhd.Timescale
+		}
+	}
+	return 0
+}
+
+// prependPicTiming prepends a pic_timing SEI NALU to an Annex-B access unit. The
+// timecode is derived from the sample's decode time, the per-sample duration,
+// and the media timescale (fps = round(timescale/sampleDur)). The SEI precedes
+// the slice in the access unit. Returns the input unchanged if timing cannot be
+// derived (zero duration or timescale).
+func prependPicTiming(cfg encode.PicTimingConfig, sliceAnnexB []byte,
+	decodeTime uint64, sampleDur, timescale uint32) ([]byte, error) {
+	if sampleDur == 0 || timescale == 0 {
+		return sliceAnnexB, nil
+	}
+	fps := int((timescale + sampleDur/2) / uint32(sampleDur))
+	if fps <= 0 {
+		return sliceAnnexB, nil
+	}
+	frameIdx := int(decodeTime / uint64(sampleDur))
+	h, m, s, fr := yuv.TimecodeComponents(frameIdx, fps)
+	seiNALU, err := encode.GeneratePicTimingSEI(cfg, encode.PicTiming{
+		Hours: uint8(h), Minutes: uint8(m), Seconds: uint8(s), Frames: uint8(fr),
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]byte, 0, len(seiNALU)+len(sliceAnnexB))
+	out = append(out, seiNALU...)
+	out = append(out, sliceAnnexB...)
+	return out, nil
 }

@@ -459,8 +459,8 @@ func TestEncodePSkipCAVLC(t *testing.T) {
 
 // TestSPSMaxRefFrames verifies SPS with maxRef=0 is unchanged, maxRef=1 differs.
 func TestSPSMaxRefFrames(t *testing.T) {
-	sps0 := EncodeSPS(32, 32, 0, 30, 0, 0)
-	sps1 := EncodeSPS(32, 32, 1, 30, 0, 0)
+	sps0 := EncodeSPS(32, 32, 0, 30, 0, 0, false)
+	sps1 := EncodeSPS(32, 32, 1, 30, 0, 0, false)
 
 	if bytes.Equal(sps0, sps1) {
 		t.Error("SPS with maxRef=0 and maxRef=1 should differ")

@@ -143,6 +143,10 @@ go run ./cmd/hi264gen -w 176 -h 80 -n 10 -text "%03d" -o counter.264
 # Timestamp overlay
 go run ./cmd/hi264gen -w 512 -h 240 -n 75 -fps 25 -text "%mm:%ss.%ff" -o timestamp.264
 
+# Picture Timing SEI: embed a HH:MM:SS:FF timecode per frame (sets pic_struct_present_flag).
+# Works for IDR and P_Skip frames; verify with `mp4ff-nallister -sei 1`.
+go run ./cmd/hi264gen -smpte -w 512 -h 240 -n 75 -fps 25 -pic-timing -o pic_timing.264
+
 # With P_Skip frames (IDR every 50 frames, P_Skip copies between, CAVLC)
 go run ./cmd/hi264gen -w 1280 -h 720 -n 121 -text "%03d" -idr-interval 50 -o counter.264
 
@@ -228,6 +232,7 @@ Flags:
 | `-kbps` | Target bitrate in kbit/s (converted to bpp using `-fps`) | 0 (off) |
 | `-colorspace` | Color space (`bt601`/`bt709`/`bt2020`) | `bt601` |
 | `-full-range` | Full-range YCbCr (0-255) | off (limited) |
+| `-pic-timing` | Emit a Picture Timing SEI timecode (`HH:MM:SS:FF` from `-fps`) per frame; 264/mp4 only | off |
 | `-fps` | MP4 framerate | 25 |
 | `-frag-dur` | MP4 fragment duration in frames | 25 |
 | `-o` | Output file (`-` for stdout) | — |

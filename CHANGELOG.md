@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+#### Picture Timing SEI (pic_timing)
+- `encode.GeneratePicTimingSEI` / `encode.BuildPicTimingSEINALU`: build an
+  H.264 Picture Timing SEI NAL unit (payload type 1) carrying a progressive-frame
+  clock timestamp (HH:MM:SS:FF). Annex-B and raw-NALU forms; prepend to an IDR or
+  P_Skip slice (composes with either).
+- `encode.PicTiming` / `encode.PicTimingConfig` / `encode.HRDDelayLengths`: the
+  per-picture data and SPS-derived syntax context. `PicTimingConfigFromSPS`
+  derives the context (pic_struct_present, HRD field lengths) from a parsed SPS
+  for matching a foreign stream when extending.
+- `EncodeParams.PicStructPresent` and `FrameEncoder.PicStructPresent`, plus a new
+  `picStructPresent` argument to `EncodeSPS`/`EncodeSPSMain`, set the VUI
+  `pic_struct_present_flag` (required to attach pic_timing clock timestamps).
+- `hi264gen -pic-timing`: emit a pic_timing SEI timecode (derived from `-fps`)
+  per frame for `264`/`mp4` output, for both IDR and P_Skip frames; sets the SPS
+  `pic_struct_present_flag`.
+- `hi264-mp4-extend`: appended frames continue the source's pic_timing timecodes
+  when the source SPS signals `pic_struct_present_flag` (non-HRD streams).
+- `yuv.TimecodeComponents`: shared HH:MM:SS:FF derivation for the `-text`
+  specifiers and pic_timing SEI timecodes.
+
 ### Documentation
 - Document `hi264gen -text` format specifiers (`%d`/`%Nd`/`%0Nd`, `%hh`/`%mm`/`%ss`/`%ff`/`%ms`, `%%`, `\n`) in both the README and the CLI help text, with copy-pasteable examples for counters, SMPTE timecode, millisecond timestamps, and multi-line overlays.
 

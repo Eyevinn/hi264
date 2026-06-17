@@ -2,6 +2,22 @@ package yuv
 
 import "fmt"
 
+// TimecodeComponents returns the wall-clock timecode (hours, minutes, seconds,
+// and frame index within the current second) for a given frame number and fps.
+// It is the shared basis for the %hh/%mm/%ss/%ff text specifiers and for
+// pic_timing SEI clock timestamps. fps <= 0 is treated as 1.
+func TimecodeComponents(frameNum, fps int) (hours, minutes, seconds, frameInSecond int) {
+	if fps <= 0 {
+		fps = 1
+	}
+	totalSeconds := frameNum / fps
+	hours = totalSeconds / 3600
+	minutes = (totalSeconds % 3600) / 60
+	seconds = totalSeconds % 60
+	frameInSecond = frameNum % fps
+	return hours, minutes, seconds, frameInSecond
+}
+
 // FormatText expands %-specifiers in pattern for the given frame number and fps.
 //
 // Supported specifiers:
@@ -20,11 +36,7 @@ func FormatText(pattern string, frameNum, fps int) string {
 		fps = 1
 	}
 
-	totalSeconds := frameNum / fps
-	hours := totalSeconds / 3600
-	minutes := (totalSeconds % 3600) / 60
-	seconds := totalSeconds % 60
-	frameInSecond := frameNum % fps
+	hours, minutes, seconds, frameInSecond := TimecodeComponents(frameNum, fps)
 	milliseconds := (frameNum % fps) * 1000 / fps
 
 	var out []byte

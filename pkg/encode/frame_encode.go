@@ -26,6 +26,9 @@ type FrameEncoder struct {
 	Range           yuv.Range      // sample value range (default LimitedRange)
 	FPS             int            // frame rate for level selection (0 = ignore MBPS)
 	Kbps            int            // bitrate in kbit/s for level selection (0 = ignore)
+	// PicStructPresent sets vui pic_struct_present_flag in the SPS written by
+	// EncodeSPSPPS. Required to attach pic_timing SEI clock timestamps.
+	PicStructPresent bool
 
 	// SPS/PPS, when non-nil, control IDR slice-header bit widths,
 	// pic_order_cnt_type, pic_parameter_set_id, and slice_qp_delta
@@ -111,7 +114,7 @@ func (e *FrameEncoder) EncodeSPSPPS(buf *bytes.Buffer) error {
 
 	level := ChooseLevel(width, height, e.FPS, e.Kbps, e.CABAC)
 	if e.CABAC {
-		spsRBSP := EncodeSPSMain(width, height, e.MaxNumRefFrames, level, e.ColorSpace, e.Range)
+		spsRBSP := EncodeSPSMain(width, height, e.MaxNumRefFrames, level, e.ColorSpace, e.Range, e.PicStructPresent)
 		if err := WriteNALU(buf, 7, 3, spsRBSP); err != nil {
 			return fmt.Errorf("write SPS: %w", err)
 		}
@@ -120,7 +123,7 @@ func (e *FrameEncoder) EncodeSPSPPS(buf *bytes.Buffer) error {
 			return fmt.Errorf("write PPS: %w", err)
 		}
 	} else {
-		spsRBSP := EncodeSPS(width, height, e.MaxNumRefFrames, level, e.ColorSpace, e.Range)
+		spsRBSP := EncodeSPS(width, height, e.MaxNumRefFrames, level, e.ColorSpace, e.Range, e.PicStructPresent)
 		if err := WriteNALU(buf, 7, 3, spsRBSP); err != nil {
 			return fmt.Errorf("write SPS: %w", err)
 		}
