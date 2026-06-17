@@ -21,6 +21,10 @@ type PicTiming struct {
 	Seconds uint8
 	Frames  uint8 // frame index within the current second (n_frames)
 
+	// Dropped sets cnt_dropped_flag for this frame: true on the frames where a
+	// drop-frame label skip occurs. Only meaningful when PicTimingConfig.DropFrame.
+	Dropped bool
+
 	// HRD-only fields, used iff PicTimingConfig.HRD != nil.
 	CpbRemovalDelay uint
 	DpbOutputDelay  uint
@@ -47,6 +51,10 @@ type PicTimingConfig struct {
 	// PicStructPresent must mirror the SPS VUI pic_struct_present_flag. It must
 	// be true for the clock-timestamp syntax these helpers emit.
 	PicStructPresent bool
+	// DropFrame selects NTSC drop-frame counting semantics: it sets
+	// counting_type = 4 (so decoders show the timecode as drop-frame). Set
+	// PicTiming.Dropped on the individual frames where labels are skipped.
+	DropFrame bool
 	// HRD is non-nil when the SPS signals HRD parameters
 	// (CpbDpbDelaysPresentFlag). When set, cpb_removal_delay/dpb_output_delay
 	// are written ahead of pic_struct at the given bit-lengths.
@@ -109,9 +117,18 @@ func BuildPicTimingSEINALU(cfg PicTimingConfig, pt PicTiming) ([]byte, error) {
 // and per-picture data. pict_struct is 0 (progressive frame), which means
 // exactly one clock timestamp.
 func picTimingMessage(cfg PicTimingConfig, pt PicTiming) *sei.PicTimingAvcSEI {
+	// counting_type: 1 = no dropping; 4 = NTSC drop-frame (drop the two lowest
+	// n_frames values each minute except every tenth). See ISO/IEC 14496-10
+	// Table D-2.
+	countingType := byte(1)
+	if cfg.DropFrame {
+		countingType = 4
+	}
 	clock := sei.ClockTSAvc{
 		ClockTimeStampFlag: true,
 		CtType:             0, // 0 = progressive
+		CountingType:       countingType,
+		CntDroppedFlag:     pt.Dropped,
 		FullTimeStampFlag:  true,
 		Hours:              pt.Hours,
 		Minutes:            pt.Minutes,

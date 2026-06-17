@@ -29,9 +29,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   counters, timecodes, the pic_timing SEI, and (for `mp4`) the media timeline
   (`tfdt`) and fragment `sequence_number` — so independently generated segments
   concatenate into one continuous frame-number + timecode sequence.
+- `hi264gen -fps` now accepts fractional rates — integer (`25`), rational
+  (`30000/1001`), or NTSC decimal (`29.97`/`59.94`/`23.976`). Fractional rates
+  set the MP4 media timescale to the numerator and the per-sample duration to the
+  denominator, so the stream plays at the correct speed. Timecodes count at the
+  nominal integer rate (`round(fps)`).
+- `hi264gen -drop-frame`: NTSC drop-frame timecode counting (valid only for
+  29.97/59.94); skips the timecode labels at minute boundaries and signals it in
+  the pic_timing SEI (`counting_type = 4`, `cnt_dropped_flag`).
 - `yuv.Timecode(frame, rate, dropFrame)`: 24-hour-wrapping timecode conversion
   with NTSC drop-frame support (rate 30/60); `TimecodeComponents` now wraps at
-  24h. Backs both the `-text` timecode specifiers and the pic_timing SEI.
+  24h. `yuv.FormatTextTC` adds rate + drop-frame to the text formatter. Both back
+  the `-text` timecode specifiers and the pic_timing SEI.
 - `hi264-mp4-extend`: appended frames continue the source's pic_timing timecodes
   when the source SPS signals `pic_struct_present_flag` (non-HRD streams).
 
