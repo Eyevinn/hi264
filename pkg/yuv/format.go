@@ -91,12 +91,20 @@ func TimecodeComponents(frameNum, fps int) (hours, minutes, seconds, frameInSeco
 //	%ms      milliseconds (3 digits)
 //	%%       literal %
 func FormatText(pattern string, frameNum, fps int) string {
-	if fps <= 0 {
-		fps = 1
+	return FormatTextTC(pattern, frameNum, fps, false)
+}
+
+// FormatTextTC is FormatText with an explicit timecode counting rate and
+// drop-frame mode. The %hh/%mm/%ss/%ff/%ms timecode specifiers wrap at 24h and
+// honour drop-frame counting (rate 30/60); the %d frame-number specifiers use
+// the absolute frame value unchanged.
+func FormatTextTC(pattern string, frameNum, rate int, dropFrame bool) string {
+	if rate <= 0 {
+		rate = 1
 	}
 
-	hours, minutes, seconds, frameInSecond := TimecodeComponents(frameNum, fps)
-	milliseconds := (frameNum % fps) * 1000 / fps
+	hours, minutes, seconds, frameInSecond, _ := Timecode(int64(frameNum), rate, dropFrame)
+	milliseconds := frameInSecond * 1000 / rate
 
 	var out []byte
 	i := 0

@@ -56,6 +56,7 @@ Usage:
   %s -w 176 -h 80 -n 10 -text "%%03d" -o output.264
   %s -smpte -w 320 -h 240 -n 100 -text "%%03d" -f 264 -o - | ffplay -i -
   %s -gi photo.jpg -8x8 -o output.264                                  # 8x8 input granularity
+  %s -smpte -w 512 -h 240 -n 75 -pic-timing -o timecode.264            # per-frame Picture Timing SEI
 
 Output format is detected from the file extension, or set explicitly with -f:
   264        H.264 Annex-B bitstream (SPS+PPS once, then N slices)
@@ -82,6 +83,12 @@ Text overlay format specifiers (for -text, evaluated per frame using -fps):
 
 Examples: -text "%%03d", -text "%%mm:%%ss.%%ff", -text "%%hh:%%mm:%%ss.%%ms",
           -text "FRAME %%05d\n%%mm:%%ss.%%ff"
+
+Picture Timing SEI (-pic-timing) embeds the same HH:MM:SS:FF timecode as SEI
+NAL units for 264/mp4 output (read back with ffprobe's per-frame timecode tag).
+-start-frame N offsets the timecode, counters, and (mp4) media timeline so
+segments concatenate. -fps accepts 30000/1001 or 29.97/59.94, with -drop-frame
+for NTSC drop-frame counting.
 
 Options:
 `
@@ -117,7 +124,11 @@ type options struct {
 	bpp         int
 	kbps        int
 	jpegQual    int
-	fps         int
+	fpsStr      string // raw -fps value (N, NUM/DEN, or NTSC decimal)
+	fps         int    // integer timecode counting rate = round(fpsNum/fpsDen)
+	fpsNum      int    // exact frame-rate numerator (media timescale)
+	fpsDen      int    // exact frame-rate denominator (sample duration)
+	dropFrame   bool
 	fragDur     int
 	colorspace  string
 	fullRange   bool
@@ -158,7 +169,8 @@ func parseOptions(fs *flag.FlagSet, args []string) (*options, error) {
 	fs.IntVar(&opts.bpp, "bpp", 0, "target bytes per picture (pad with filler NALUs)")
 	fs.IntVar(&opts.kbps, "kbps", 0, "target bitrate in kbit/s (converted to bytes per picture using -fps)")
 	fs.IntVar(&opts.jpegQual, "q", 85, "JPEG quality (1-100)")
-	fs.IntVar(&opts.fps, "fps", 25, "framerate for MP4 and timestamp specifiers")
+	fs.StringVar(&opts.fpsStr, "fps", "25",
+		"framerate: integer (25), rational (30000/1001), or NTSC decimal (29.97/59.94/23.976)")
 	fs.IntVar(&opts.fragDur, "frag-dur", 25, "fragment duration in frames for MP4 output")
 	fs.StringVar(&opts.colorspace, "colorspace", "bt601", "color space (bt601, bt709, bt2020)")
 	fs.BoolVar(&opts.fullRange, "full-range", false, "use full-range YCbCr (0-255)")
@@ -168,12 +180,14 @@ func parseOptions(fs *flag.FlagSet, args []string) (*options, error) {
 	fs.IntVar(&opts.startFrame, "start-frame", 0,
 		"starting frame number: offsets frame counters, timecodes, the pic_timing SEI, "+
 			"and (mp4) the media timeline, so segments concatenate continuously")
+	fs.BoolVar(&opts.dropFrame, "drop-frame", false,
+		"use NTSC drop-frame timecode counting (only valid for -fps 29.97 or 59.94)")
 	fs.BoolVar(&opts.use8x8, "8x8", false,
 		"8x8 input block granularity (each grid char = 8x8 block, finer detail, double-res text)")
 	fs.StringVar(&opts.cpuProfile, "cpuprofile", "", "write CPU profile to file")
 	fs.StringVar(&opts.output, "o", "", "output file (required)")
 	fs.Usage = func() {
-		fmt.Fprintf(os.Stderr, usg, appName, appName, appName, appName, appName, appName, appName)
+		fmt.Fprintf(os.Stderr, usg, appName, appName, appName, appName, appName, appName, appName, appName)
 		fs.PrintDefaults()
 	}
 	err := fs.Parse(args[1:])
@@ -226,6 +240,44 @@ func openOutput(path string) (io.WriteCloser, error) {
 		return nil, err
 	}
 	return &bufferedWriteCloser{bw: bufio.NewWriter(f), closer: f}, nil
+}
+
+// parseFPS parses a -fps value into an exact numerator/denominator. It accepts
+// an integer ("25"), a rational ("30000/1001"), or the common NTSC decimals
+// ("23.976", "29.97", "59.94", "119.88"), which map to their exact 1001
+// fractions. Other decimals are rejected in favour of the explicit NUM/DEN form.
+func parseFPS(s string) (num, den int, err error) {
+	s = strings.TrimSpace(s)
+	if numStr, denStr, ok := strings.Cut(s, "/"); ok {
+		n, e1 := strconv.Atoi(strings.TrimSpace(numStr))
+		d, e2 := strconv.Atoi(strings.TrimSpace(denStr))
+		if e1 != nil || e2 != nil {
+			return 0, 0, fmt.Errorf("invalid fps %q (expected N or NUM/DEN)", s)
+		}
+		if d <= 0 {
+			return 0, 0, fmt.Errorf("fps denominator must be positive, got %d", d)
+		}
+		return n, d, nil
+	}
+	if strings.ContainsRune(s, '.') {
+		switch s {
+		case "23.976", "23.98":
+			return 24000, 1001, nil
+		case "29.97":
+			return 30000, 1001, nil
+		case "59.94":
+			return 60000, 1001, nil
+		case "119.88":
+			return 120000, 1001, nil
+		}
+		return 0, 0, fmt.Errorf("unsupported fractional fps %q "+
+			"(use NUM/DEN, e.g. 30000/1001, or 23.976/29.97/59.94)", s)
+	}
+	n, e := strconv.Atoi(s)
+	if e != nil {
+		return 0, 0, fmt.Errorf("invalid fps %q (expected N or NUM/DEN)", s)
+	}
+	return n, 1, nil
 }
 
 // resolveFormat determines the output format from -f flag or file extension.
@@ -416,14 +468,27 @@ func run(args []string) error {
 	if opts.bpp > 0 && opts.kbps > 0 {
 		return fmt.Errorf("-bpp and -kbps are mutually exclusive")
 	}
+	num, den, err := parseFPS(opts.fpsStr)
+	if err != nil {
+		return err
+	}
+	opts.fpsNum, opts.fpsDen = num, den
+	opts.fps = (num + den/2) / den // nominal integer counting rate (29.97 -> 30)
 	if opts.fps <= 0 {
-		return fmt.Errorf("fps must be positive, got %d", opts.fps)
+		return fmt.Errorf("fps must be positive, got %q", opts.fpsStr)
+	}
+	if opts.dropFrame {
+		isNTSC := opts.fpsDen == 1001 && (opts.fpsNum == 30000 || opts.fpsNum == 60000)
+		if !isNTSC {
+			return fmt.Errorf("-drop-frame is only valid for -fps 29.97 (30000/1001) or 59.94 (60000/1001)")
+		}
 	}
 	if opts.startFrame < 0 {
 		return fmt.Errorf("start-frame must be non-negative, got %d", opts.startFrame)
 	}
 	if opts.kbps > 0 {
-		opts.bpp = opts.kbps * 1000 / 8 / opts.fps
+		// bytes per frame = (kbps*1000/8) / fps, using the exact fps = num/den.
+		opts.bpp = opts.kbps * 1000 * opts.fpsDen / (8 * opts.fpsNum)
 	}
 	if opts.fragDur <= 0 {
 		return fmt.Errorf("frag-dur must be positive, got %d", opts.fragDur)
@@ -572,7 +637,7 @@ func run(args []string) error {
 // bgPlane is an optional PlaneGrid from a PNG/JPEG image; when set,
 // the PlaneGrid-based flow is used (tile + text overlay) instead of Grid.
 func buildFrameGrid(i int, patGrid *yuv.Grid, patColors yuv.ColorMap,
-	mbW, mbH, scale, fps int, text string, bg, fg yuv.Color,
+	mbW, mbH, scale, fps int, dropFrame bool, text string, bg, fg yuv.Color,
 	textBg *yuv.Color, tiled bool, blockSize int, bgPlane *yuv.PlaneGrid) (*yuv.PlaneGrid, error) {
 
 	// PlaneGrid-based flow for PNG/JPEG backgrounds
@@ -587,7 +652,7 @@ func buildFrameGrid(i int, patGrid *yuv.Grid, patColors yuv.ColorMap,
 			}
 		}
 		if text != "" {
-			formatted := yuv.FormatText(text, i, fps)
+			formatted := yuv.FormatTextTC(text, i, fps, dropFrame)
 			// Clone so each frame gets a fresh copy for text overlay
 			clone := yuv.NewPlaneGrid(pg.Width, pg.Height, pg.BlockSize)
 			for y := range pg.Height {
@@ -611,7 +676,7 @@ func buildFrameGrid(i int, patGrid *yuv.Grid, patColors yuv.ColorMap,
 		return yuv.GridToPlaneGridBS(grid, colors, blockSize)
 	} else if text != "" {
 		var err error
-		formatted := yuv.FormatText(text, i, fps)
+		formatted := yuv.FormatTextTC(text, i, fps, dropFrame)
 		use2xFont := blockSize == 8 || (scale >= 2 && scale%2 == 0)
 		if use2xFont {
 			// Double-resolution text: 6×10 glyphs at 8x8 block granularity.
@@ -697,7 +762,8 @@ func generateH264(opts *options, frameW, frameH, mbWidth, mbHeight, disableDeblo
 	}
 
 	plane, err := buildFrameGrid(opts.startFrame, patGrid, patColors,
-		mbWidth, mbHeight, textScale, opts.fps, opts.text, bg, fg, textBg, tiled, opts.blockSize, opts.bgPlane)
+		mbWidth, mbHeight, textScale, opts.fps, opts.dropFrame, opts.text,
+		bg, fg, textBg, tiled, opts.blockSize, opts.bgPlane)
 	if err != nil {
 		return err
 	}
@@ -762,10 +828,12 @@ func withPicTiming(opts *options, frameIdx int, slice []byte) ([]byte, error) {
 	if !opts.picTiming {
 		return slice, nil
 	}
-	h, m, s, fr := yuv.TimecodeComponents(opts.startFrame+frameIdx, opts.fps)
+	h, m, s, fr, dropped := yuv.Timecode(int64(opts.startFrame+frameIdx), opts.fps, opts.dropFrame)
 	seiNALU, err := encode.GeneratePicTimingSEI(
-		encode.PicTimingConfig{PicStructPresent: true},
-		encode.PicTiming{Hours: uint8(h), Minutes: uint8(m), Seconds: uint8(s), Frames: uint8(fr)})
+		encode.PicTimingConfig{PicStructPresent: true, DropFrame: opts.dropFrame},
+		encode.PicTiming{
+			Hours: uint8(h), Minutes: uint8(m), Seconds: uint8(s), Frames: uint8(fr), Dropped: dropped,
+		})
 	if err != nil {
 		return nil, fmt.Errorf("frame %d: pic_timing SEI: %w", frameIdx, err)
 	}
@@ -793,7 +861,8 @@ func generateH264AllIDR(f io.Writer, opts *options, frameW, frameH, mbWidth, mbH
 
 	for i := range opts.numFrames {
 		plane, err := buildFrameGrid(opts.startFrame+i, patGrid, patColors,
-			mbWidth, mbHeight, textScale, opts.fps, opts.text, bg, fg, textBg, tiled, opts.blockSize, opts.bgPlane)
+			mbWidth, mbHeight, textScale, opts.fps, opts.dropFrame, opts.text,
+			bg, fg, textBg, tiled, opts.blockSize, opts.bgPlane)
 		if err != nil {
 			return err
 		}
@@ -834,7 +903,8 @@ func generateH264WithPSkip(f io.Writer, opts *options, mbWidth, mbHeight int,
 	for i := range opts.numFrames {
 		if i%opts.idrInterval == 0 {
 			plane, err := buildFrameGrid(opts.startFrame+i, patGrid, patColors,
-				mbWidth, mbHeight, textScale, opts.fps, opts.text, bg, fg, textBg, tiled, opts.blockSize, opts.bgPlane)
+				mbWidth, mbHeight, textScale, opts.fps, opts.dropFrame, opts.text,
+				bg, fg, textBg, tiled, opts.blockSize, opts.bgPlane)
 			if err != nil {
 				return err
 			}
@@ -902,9 +972,11 @@ func generateMP4(opts *options, frameW, frameH, mbWidth, mbHeight, disableDebloc
 	spsNALU := encode.BuildNALU(7, 3, spsRBSP)
 	ppsNALU := encode.BuildNALU(8, 3, ppsRBSP)
 
-	// Create init segment
+	// Create init segment. The media timescale is the exact fps numerator and
+	// each sample lasts fpsDen ticks, so fractional rates (e.g. 30000/1001)
+	// play at the correct speed.
 	init := mp4.CreateEmptyInit()
-	init.AddEmptyTrack(uint32(opts.fps), "video", "und")
+	init.AddEmptyTrack(uint32(opts.fpsNum), "video", "und")
 	trak := init.Moov.Trak
 	if err := trak.SetAVCDescriptor("avc1", [][]byte{spsNALU}, [][]byte{ppsNALU}, true); err != nil {
 		return fmt.Errorf("set AVC descriptor: %w", err)
@@ -915,7 +987,8 @@ func generateMP4(opts *options, frameW, frameH, mbWidth, mbHeight, disableDebloc
 
 	// Create encoder for frame generation
 	plane, err := buildFrameGrid(opts.startFrame, patGrid, patColors,
-		mbWidth, mbHeight, textScale, opts.fps, opts.text, bg, fg, textBg, tiled, opts.blockSize, opts.bgPlane)
+		mbWidth, mbHeight, textScale, opts.fps, opts.dropFrame, opts.text,
+		bg, fg, textBg, tiled, opts.blockSize, opts.bgPlane)
 	if err != nil {
 		return err
 	}
@@ -946,7 +1019,7 @@ func generateMP4(opts *options, frameW, frameH, mbWidth, mbHeight, disableDebloc
 		for i := range opts.numFrames {
 			if i%opts.idrInterval == 0 {
 				pg, err := buildFrameGrid(opts.startFrame+i, patGrid, patColors,
-					mbWidth, mbHeight, textScale, opts.fps, opts.text, bg, fg,
+					mbWidth, mbHeight, textScale, opts.fps, opts.dropFrame, opts.text, bg, fg,
 					textBg, tiled, opts.blockSize, opts.bgPlane)
 				if err != nil {
 					return err
@@ -983,7 +1056,8 @@ func generateMP4(opts *options, frameW, frameH, mbWidth, mbHeight, disableDebloc
 	} else {
 		for i := range opts.numFrames {
 			pg, err := buildFrameGrid(opts.startFrame+i, patGrid, patColors,
-				mbWidth, mbHeight, textScale, opts.fps, opts.text, bg, fg, textBg, tiled, opts.blockSize, opts.bgPlane)
+				mbWidth, mbHeight, textScale, opts.fps, opts.dropFrame, opts.text,
+				bg, fg, textBg, tiled, opts.blockSize, opts.bgPlane)
 			if err != nil {
 				return err
 			}
@@ -1032,11 +1106,11 @@ func generateMP4(opts *options, frameW, frameH, mbWidth, mbHeight, disableDebloc
 			frag.AddFullSample(mp4.FullSample{
 				Sample: mp4.Sample{
 					Flags:                 flags,
-					Dur:                   1,
+					Dur:                   uint32(opts.fpsDen),
 					Size:                  uint32(len(sampleData)),
 					CompositionTimeOffset: 0,
 				},
-				DecodeTime: uint64(opts.startFrame + i),
+				DecodeTime: uint64(opts.startFrame+i) * uint64(opts.fpsDen),
 				Data:       sampleData,
 			})
 		}
@@ -1061,8 +1135,8 @@ func generateMP4(opts *options, frameW, frameH, mbWidth, mbHeight, disableDebloc
 	if opts.bpp > 0 {
 		bppInfo = fmt.Sprintf(", bpp=%d", opts.bpp)
 	}
-	fmt.Fprintf(os.Stderr, "Wrote %d frames %dx%d (%s, QP=%d, %d fps, frag=%d%s%s) to %s\n",
-		opts.numFrames, frameW, frameH, entropy, opts.qp, opts.fps, opts.fragDur, idrInfo, bppInfo, opts.output)
+	fmt.Fprintf(os.Stderr, "Wrote %d frames %dx%d (%s, QP=%d, %s fps, frag=%d%s%s) to %s\n",
+		opts.numFrames, frameW, frameH, entropy, opts.qp, opts.fpsStr, opts.fragDur, idrInfo, bppInfo, opts.output)
 	return nil
 }
 
@@ -1082,7 +1156,8 @@ func generateY4M(opts *options, frameW, frameH, mbWidth, mbHeight int,
 
 	for i := range opts.numFrames {
 		pg, err := buildFrameGrid(opts.startFrame+i, patGrid, patColors,
-			mbWidth, mbHeight, textScale, opts.fps, opts.text, bg, fg, textBg, tiled, opts.blockSize, opts.bgPlane)
+			mbWidth, mbHeight, textScale, opts.fps, opts.dropFrame, opts.text,
+			bg, fg, textBg, tiled, opts.blockSize, opts.bgPlane)
 		if err != nil {
 			return err
 		}
@@ -1108,7 +1183,8 @@ func generateFormattedImages(opts *options, frameW, frameH, mbWidth, mbHeight in
 
 	for i := range opts.numFrames {
 		pg, err := buildFrameGrid(opts.startFrame+i, patGrid, patColors,
-			mbWidth, mbHeight, textScale, opts.fps, opts.text, bg, fg, textBg, tiled, opts.blockSize, opts.bgPlane)
+			mbWidth, mbHeight, textScale, opts.fps, opts.dropFrame, opts.text,
+			bg, fg, textBg, tiled, opts.blockSize, opts.bgPlane)
 		if err != nil {
 			return err
 		}
@@ -1149,7 +1225,8 @@ func generateYUV(opts *options, frameW, frameH, mbWidth, mbHeight int,
 
 	for i := range opts.numFrames {
 		pg, err := buildFrameGrid(opts.startFrame+i, patGrid, patColors,
-			mbWidth, mbHeight, textScale, opts.fps, opts.text, bg, fg, textBg, tiled, opts.blockSize, opts.bgPlane)
+			mbWidth, mbHeight, textScale, opts.fps, opts.dropFrame, opts.text,
+			bg, fg, textBg, tiled, opts.blockSize, opts.bgPlane)
 		if err != nil {
 			return err
 		}
@@ -1174,7 +1251,8 @@ func generateNumberedImages(opts *options, frameW, frameH, mbWidth, mbHeight int
 
 	for i := range opts.numFrames {
 		pg, err := buildFrameGrid(opts.startFrame+i, patGrid, patColors,
-			mbWidth, mbHeight, textScale, opts.fps, opts.text, bg, fg, textBg, tiled, opts.blockSize, opts.bgPlane)
+			mbWidth, mbHeight, textScale, opts.fps, opts.dropFrame, opts.text,
+			bg, fg, textBg, tiled, opts.blockSize, opts.bgPlane)
 		if err != nil {
 			return err
 		}

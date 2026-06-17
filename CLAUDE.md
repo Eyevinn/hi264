@@ -57,6 +57,18 @@ encoder verification tests.
 - Built-in 75% SMPTE color bars pattern (`-smpte`)
 - Filler NAL padding (`-bpp`) for fixed bytes-per-picture / CBR-like streams
 - Stdout output (`-o -`) with explicit format flag (`-f 264`, `-f mp4`, etc.)
+- Picture Timing SEI (`-pic-timing`): per-frame HH:MM:SS:FF timecode SEI (payload
+  type 1) on IDR and P_Skip frames; sets SPS `pic_struct_present_flag`. Public API
+  `encode.GeneratePicTimingSEI`/`BuildPicTimingSEINALU` + `PicTimingConfigFromSPS`
+- Start frame offset (`-start-frame N`): offsets counters, timecodes, the
+  pic_timing SEI, and (mp4) the media timeline (`tfdt`/`sequence_number`) so
+  segments concatenate continuously
+- Fractional frame rates (`-fps 30000/1001`, `29.97`/`59.94`/`23.976`): mp4
+  timescale = numerator, sample duration = denominator
+- NTSC drop-frame timecode (`-drop-frame`, 29.97/59.94 only): signalled via
+  `counting_type=4` / `cnt_dropped_flag`. 24h-wrapping `yuv.Timecode` engine
+- `hi264-mp4-extend` continues source pic_timing timecodes onto appended frames
+  when the source SPS signals `pic_struct_present_flag` (non-HRD)
 
 #### Color Space Support
 - BT.601 (SD, default), BT.709 (HD), BT.2020 (UHD) color spaces
@@ -133,6 +145,13 @@ go run ./cmd/hi264gen -smpte -w 352 -h 288 -n 1 -text "%02d" -text-scale 3 -text
 
 # Timestamp overlay
 go run ./cmd/hi264gen -smpte -w 512 -h 240 -n 75 -fps 25 -text "%mm:%ss.%ff" -o timestamp.264
+
+# Picture Timing SEI timecode per frame (read back via `mp4ff-nallister -sei 1`
+# or ffprobe's per-frame `timecode` tag); -start-frame offsets the timecode.
+go run ./cmd/hi264gen -smpte -w 512 -h 240 -n 75 -fps 25 -pic-timing -start-frame 76 -o pic_timing.264
+
+# Fractional frame rate + NTSC drop-frame timecode
+go run ./cmd/hi264gen -smpte -w 512 -h 240 -n 60 -fps 29.97 -drop-frame -pic-timing -o df.264
 
 # Fixed bytes per picture (pad with filler NALUs for CBR-like streams)
 go run ./cmd/hi264gen -smpte -w 176 -h 80 -bpp 5000 -o padded.264

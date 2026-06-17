@@ -63,6 +63,21 @@ func TestTimecodeDropFrame(t *testing.T) {
 	}
 }
 
+func TestFormatTextTCDropFrame(t *testing.T) {
+	// Frame 1800 at rate 30 drop-frame is 00:01:00;02 -> %ff == 02.
+	if got := FormatTextTC("%mm:%ss.%ff", 1800, 30, true); got != "01:00.02" {
+		t.Errorf("drop-frame FormatTextTC = %q, want 01:00.02", got)
+	}
+	// Same frame non-drop is 00:01:00:00.
+	if got := FormatTextTC("%mm:%ss.%ff", 1800, 30, false); got != "01:00.00" {
+		t.Errorf("non-drop FormatTextTC = %q, want 01:00.00", got)
+	}
+	// %d frame number is unaffected by drop-frame.
+	if got := FormatTextTC("%d", 1800, 30, true); got != "1800" {
+		t.Errorf("FormatTextTC %%d = %q, want 1800", got)
+	}
+}
+
 // TestTimecodeNonDropContiguous verifies that consecutive frames produce a
 // strictly advancing, reversible label in non-drop mode — the property that
 // makes concatenated segments line up.

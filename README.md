@@ -156,6 +156,12 @@ go run ./cmd/hi264gen -smpte -w 512 -h 240 -n 48 -fps 25 -pic-timing -start-fram
 #   ffprobe -loglevel error -select_streams v:0 \
 #     -show_entries frame_tags=timecode -of default=nw=1:nk=1 pic_timing.264
 
+# Fractional frame rate (29.97 = 30000/1001): MP4 timescale 30000, sample dur 1001.
+go run ./cmd/hi264gen -smpte -w 512 -h 240 -n 60 -fps 30000/1001 -pic-timing -o ntsc.mp4
+
+# NTSC drop-frame timecode (valid only for 29.97/59.94):
+go run ./cmd/hi264gen -smpte -w 512 -h 240 -n 60 -fps 29.97 -drop-frame -pic-timing -o df.264
+
 # With P_Skip frames (IDR every 50 frames, P_Skip copies between, CAVLC)
 go run ./cmd/hi264gen -w 1280 -h 720 -n 121 -text "%03d" -idr-interval 50 -o counter.264
 
@@ -243,7 +249,8 @@ Flags:
 | `-full-range` | Full-range YCbCr (0-255) | off (limited) |
 | `-pic-timing` | Emit a Picture Timing SEI timecode (`HH:MM:SS:FF` from `-fps`) per frame; 264/mp4 only | off |
 | `-start-frame` | Starting frame number; offsets counters, timecodes, SEI, and (mp4) the media timeline for segment concatenation | 0 |
-| `-fps` | MP4 framerate | 25 |
+| `-fps` | Framerate: integer (`25`), rational (`30000/1001`), or NTSC decimal (`29.97`/`59.94`/`23.976`) | 25 |
+| `-drop-frame` | NTSC drop-frame timecode counting (only valid for `-fps 29.97`/`59.94`) | off |
 | `-frag-dur` | MP4 fragment duration in frames | 25 |
 | `-o` | Output file (`-` for stdout) | — |
 
