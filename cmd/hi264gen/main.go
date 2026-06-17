@@ -121,6 +121,7 @@ type options struct {
 	fragDur     int
 	colorspace  string
 	fullRange   bool
+	picTiming   bool
 	output      string
 	cpuProfile  string
 	blockSize   int            // grid block size (16 or 8), set from @8x8 directive or -8x8 flag
@@ -160,6 +161,9 @@ func parseOptions(fs *flag.FlagSet, args []string) (*options, error) {
 	fs.IntVar(&opts.fragDur, "frag-dur", 25, "fragment duration in frames for MP4 output")
 	fs.StringVar(&opts.colorspace, "colorspace", "bt601", "color space (bt601, bt709, bt2020)")
 	fs.BoolVar(&opts.fullRange, "full-range", false, "use full-range YCbCr (0-255)")
+	fs.BoolVar(&opts.picTiming, "pic-timing", false,
+		"emit a Picture Timing SEI (timecode HH:MM:SS:FF derived from -fps) per frame "+
+			"(264/mp4 only; sets SPS pic_struct_present_flag)")
 	fs.BoolVar(&opts.use8x8, "8x8", false,
 		"8x8 input block granularity (each grid char = 8x8 block, finer detail, double-res text)")
 	fs.StringVar(&opts.cpuProfile, "cpuprofile", "", "write CPU profile to file")
@@ -506,6 +510,10 @@ func run(args []string) error {
 		return err
 	}
 
+	if opts.picTiming && outFmt != "264" && outFmt != "mp4" {
+		return fmt.Errorf("-pic-timing requires H.264 output (-f 264 or mp4), got %q", outFmt)
+	}
+
 	// Validate stdout restrictions
 	if isStdout {
 		switch outFmt {
@@ -685,17 +693,18 @@ func generateH264(opts *options, frameW, frameH, mbWidth, mbHeight, disableDeblo
 	}
 
 	enc := &encode.FrameEncoder{
-		Plane:           plane,
-		QP:              opts.qp,
-		DisableDeblock:  disableDeblock,
-		CABAC:           opts.cabac,
-		MaxNumRefFrames: maxRef,
-		Width:           frameW,
-		Height:          frameH,
-		ColorSpace:      cs,
-		Range:           rng,
-		FPS:             opts.fps,
-		Kbps:            opts.kbps,
+		Plane:            plane,
+		QP:               opts.qp,
+		DisableDeblock:   disableDeblock,
+		CABAC:            opts.cabac,
+		MaxNumRefFrames:  maxRef,
+		Width:            frameW,
+		Height:           frameH,
+		ColorSpace:       cs,
+		Range:            rng,
+		FPS:              opts.fps,
+		Kbps:             opts.kbps,
+		PicStructPresent: opts.picTiming,
 	}
 
 	// Write SPS+PPS once
@@ -735,6 +744,27 @@ func generateH264(opts *options, frameW, frameH, mbWidth, mbHeight, disableDeblo
 	return nil
 }
 
+// withPicTiming prepends a Picture Timing SEI NALU (timecode for frameIdx at
+// opts.fps) to an Annex-B slice when -pic-timing is set. The SEI precedes the
+// VCL slice in the access unit and composes with both IDR and P_Skip slices.
+// When -pic-timing is off it returns slice unchanged.
+func withPicTiming(opts *options, frameIdx int, slice []byte) ([]byte, error) {
+	if !opts.picTiming {
+		return slice, nil
+	}
+	h, m, s, fr := yuv.TimecodeComponents(frameIdx, opts.fps)
+	seiNALU, err := encode.GeneratePicTimingSEI(
+		encode.PicTimingConfig{PicStructPresent: true},
+		encode.PicTiming{Hours: uint8(h), Minutes: uint8(m), Seconds: uint8(s), Frames: uint8(fr)})
+	if err != nil {
+		return nil, fmt.Errorf("frame %d: pic_timing SEI: %w", frameIdx, err)
+	}
+	out := make([]byte, 0, len(seiNALU)+len(slice))
+	out = append(out, seiNALU...)
+	out = append(out, slice...)
+	return out, nil
+}
+
 // padSlice pads a slice to the target bpp using encode.PadSlice, adding frame context to errors.
 func padSlice(slice []byte, bpp int, frameIdx int) ([]byte, error) {
 	if bpp <= 0 {
@@ -771,6 +801,9 @@ func generateH264AllIDR(f io.Writer, opts *options, frameW, frameH, mbWidth, mbH
 		if err != nil {
 			return fmt.Errorf("frame %d: %w", i, err)
 		}
+		if slice, err = withPicTiming(opts, i, slice); err != nil {
+			return err
+		}
 		if slice, err = padSlice(slice, opts.bpp, i); err != nil {
 			return err
 		}
@@ -800,6 +833,9 @@ func generateH264WithPSkip(f io.Writer, opts *options, mbWidth, mbHeight int,
 			if err != nil {
 				return fmt.Errorf("frame %d (IDR): %w", i, err)
 			}
+			if slice, err = withPicTiming(opts, i, slice); err != nil {
+				return err
+			}
 			if slice, err = padSlice(slice, opts.bpp, i); err != nil {
 				return err
 			}
@@ -812,6 +848,9 @@ func generateH264WithPSkip(f io.Writer, opts *options, mbWidth, mbHeight int,
 			slice, err := enc.EncodePSkipSlice(frameNum)
 			if err != nil {
 				return fmt.Errorf("frame %d (P_Skip): %w", i, err)
+			}
+			if slice, err = withPicTiming(opts, i, slice); err != nil {
+				return err
 			}
 			if slice, err = padSlice(slice, opts.bpp, i); err != nil {
 				return err
@@ -844,10 +883,10 @@ func generateMP4(opts *options, frameW, frameH, mbWidth, mbHeight, disableDebloc
 	level := encode.ChooseLevel(frameW, frameH, opts.fps, opts.kbps, opts.cabac)
 	var spsRBSP, ppsRBSP []byte
 	if opts.cabac {
-		spsRBSP = encode.EncodeSPSMain(frameW, frameH, maxRef, level, cs, rng)
+		spsRBSP = encode.EncodeSPSMain(frameW, frameH, maxRef, level, cs, rng, opts.picTiming)
 		ppsRBSP = encode.EncodePPSCABAC(disableDeblock)
 	} else {
-		spsRBSP = encode.EncodeSPS(frameW, frameH, maxRef, level, cs, rng)
+		spsRBSP = encode.EncodeSPS(frameW, frameH, maxRef, level, cs, rng, opts.picTiming)
 		ppsRBSP = encode.EncodePPS(disableDeblock)
 	}
 	spsNALU := encode.BuildNALU(7, 3, spsRBSP)
@@ -907,6 +946,9 @@ func generateMP4(opts *options, frameW, frameH, mbWidth, mbHeight, disableDebloc
 				if err != nil {
 					return fmt.Errorf("frame %d (IDR): %w", i, err)
 				}
+				if slice, err = withPicTiming(opts, i, slice); err != nil {
+					return err
+				}
 				if slice, err = padSlice(slice, opts.bpp, i); err != nil {
 					return err
 				}
@@ -917,6 +959,9 @@ func generateMP4(opts *options, frameW, frameH, mbWidth, mbHeight, disableDebloc
 				slice, err := enc.EncodePSkipSlice(frameNum)
 				if err != nil {
 					return fmt.Errorf("frame %d (P_Skip): %w", i, err)
+				}
+				if slice, err = withPicTiming(opts, i, slice); err != nil {
+					return err
 				}
 				if slice, err = padSlice(slice, opts.bpp, i); err != nil {
 					return err
@@ -945,6 +990,9 @@ func generateMP4(opts *options, frameW, frameH, mbWidth, mbHeight, disableDebloc
 			slice, err := enc.EncodeSlice(uint32(i % 2))
 			if err != nil {
 				return fmt.Errorf("frame %d: %w", i, err)
+			}
+			if slice, err = withPicTiming(opts, i, slice); err != nil {
+				return err
 			}
 			if slice, err = padSlice(slice, opts.bpp, i); err != nil {
 				return err
