@@ -23,11 +23,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `pic_struct_present_flag` (required to attach pic_timing clock timestamps).
 - `hi264gen -pic-timing`: emit a pic_timing SEI timecode (derived from `-fps`)
   per frame for `264`/`mp4` output, for both IDR and P_Skip frames; sets the SPS
-  `pic_struct_present_flag`.
+  `pic_struct_present_flag`. ffprobe surfaces it as the per-frame `timecode` tag
+  (SMPTE 12M side data).
+- `hi264gen -start-frame N`: starting frame number that offsets the frame
+  counters, timecodes, the pic_timing SEI, and (for `mp4`) the media timeline
+  (`tfdt`) and fragment `sequence_number` — so independently generated segments
+  concatenate into one continuous frame-number + timecode sequence.
+- `yuv.Timecode(frame, rate, dropFrame)`: 24-hour-wrapping timecode conversion
+  with NTSC drop-frame support (rate 30/60); `TimecodeComponents` now wraps at
+  24h. Backs both the `-text` timecode specifiers and the pic_timing SEI.
 - `hi264-mp4-extend`: appended frames continue the source's pic_timing timecodes
   when the source SPS signals `pic_struct_present_flag` (non-HRD streams).
-- `yuv.TimecodeComponents`: shared HH:MM:SS:FF derivation for the `-text`
-  specifiers and pic_timing SEI timecodes.
 
 ### Documentation
 - Document `hi264gen -text` format specifiers (`%d`/`%Nd`/`%0Nd`, `%hh`/`%mm`/`%ss`/`%ff`/`%ms`, `%%`, `\n`) in both the README and the CLI help text, with copy-pasteable examples for counters, SMPTE timecode, millisecond timestamps, and multi-line overlays.

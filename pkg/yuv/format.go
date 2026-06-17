@@ -2,20 +2,79 @@ package yuv
 
 import "fmt"
 
-// TimecodeComponents returns the wall-clock timecode (hours, minutes, seconds,
-// and frame index within the current second) for a given frame number and fps.
-// It is the shared basis for the %hh/%mm/%ss/%ff text specifiers and for
-// pic_timing SEI clock timestamps. fps <= 0 is treated as 1.
-func TimecodeComponents(frameNum, fps int) (hours, minutes, seconds, frameInSecond int) {
-	if fps <= 0 {
-		fps = 1
+// Timecode converts an absolute frame index to a 24-hour wall-clock timecode
+// (hours 0-23, minutes, seconds, and the frame index within the second),
+// wrapping at 24h. It is the shared basis for the %hh/%mm/%ss/%ff text
+// specifiers and for pic_timing SEI clock timestamps.
+//
+// rate is the integer timecode counting rate (frames per timecode-second, e.g.
+// 25, 30, 60); for fractional capture rates use the nominal rounded rate
+// (29.97 -> 30, 59.94 -> 60). When dropFrame is true, NTSC drop-frame counting
+// is applied (valid only for rate 30 and 60): two (rate 30) or four (rate 60)
+// timecode labels are skipped at the start of every minute except every tenth,
+// keeping the timecode close to real elapsed time. dropped reports whether a
+// label drop occurs at this frame (for the SEI cnt_dropped_flag). Negative or
+// out-of-range frame indices wrap into [0, framesPerDay). rate <= 0 is treated
+// as 1.
+func Timecode(frame int64, rate int, dropFrame bool) (h, m, s, f int, dropped bool) {
+	if rate <= 0 {
+		rate = 1
 	}
-	totalSeconds := frameNum / fps
-	hours = totalSeconds / 3600
-	minutes = (totalSeconds % 3600) / 60
-	seconds = totalSeconds % 60
-	frameInSecond = frameNum % fps
-	return hours, minutes, seconds, frameInSecond
+	r := int64(rate)
+
+	if !dropFrame {
+		framesPerDay := r * 86400
+		fd := ((frame % framesPerDay) + framesPerDay) % framesPerDay
+		f = int(fd % r)
+		sec := fd / r
+		s = int(sec % 60)
+		m = int((sec / 60) % 60)
+		h = int((sec / 3600) % 24)
+		return h, m, s, f, false
+	}
+
+	// Drop-frame counting (NTSC family): skip `drop` labels at the start of
+	// every minute except every tenth minute.
+	drop := int64(2)
+	if rate == 60 {
+		drop = 4
+	}
+	framesPer10Min := r*600 - 9*drop
+	framesPerDay := framesPer10Min * 6 * 24
+	fd := ((frame % framesPerDay) + framesPerDay) % framesPerDay
+
+	tenMin := fd / framesPer10Min
+	rem := fd % framesPer10Min
+
+	framesPerMin := r*60 - drop
+	var minuteInBlock, frameInMin int64
+	if rem < r*60 { // first minute of the ten-minute block keeps all labels
+		minuteInBlock = 0
+		frameInMin = rem
+	} else {
+		rem -= r * 60
+		minuteInBlock = 1 + rem/framesPerMin
+		frameInMin = rem % framesPerMin
+	}
+
+	label := frameInMin
+	if minuteInBlock != 0 {
+		label += drop // these minutes drop their first `drop` labels
+	}
+	f = int(label % r)
+	sec := label/r + (tenMin*10+minuteInBlock)*60
+	s = int(sec % 60)
+	m = int((sec / 60) % 60)
+	h = int((sec / 3600) % 24)
+	dropped = minuteInBlock != 0 && frameInMin == 0
+	return h, m, s, f, dropped
+}
+
+// TimecodeComponents returns the non-drop-frame 24-hour timecode for a frame
+// number and fps. Thin wrapper over Timecode for the integer-fps text path.
+func TimecodeComponents(frameNum, fps int) (hours, minutes, seconds, frameInSecond int) {
+	h, m, s, f, _ := Timecode(int64(frameNum), fps, false)
+	return h, m, s, f
 }
 
 // FormatText expands %-specifiers in pattern for the given frame number and fps.

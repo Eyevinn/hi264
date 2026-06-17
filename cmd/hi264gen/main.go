@@ -122,6 +122,7 @@ type options struct {
 	colorspace  string
 	fullRange   bool
 	picTiming   bool
+	startFrame  int
 	output      string
 	cpuProfile  string
 	blockSize   int            // grid block size (16 or 8), set from @8x8 directive or -8x8 flag
@@ -164,6 +165,9 @@ func parseOptions(fs *flag.FlagSet, args []string) (*options, error) {
 	fs.BoolVar(&opts.picTiming, "pic-timing", false,
 		"emit a Picture Timing SEI (timecode HH:MM:SS:FF derived from -fps) per frame "+
 			"(264/mp4 only; sets SPS pic_struct_present_flag)")
+	fs.IntVar(&opts.startFrame, "start-frame", 0,
+		"starting frame number: offsets frame counters, timecodes, the pic_timing SEI, "+
+			"and (mp4) the media timeline, so segments concatenate continuously")
 	fs.BoolVar(&opts.use8x8, "8x8", false,
 		"8x8 input block granularity (each grid char = 8x8 block, finer detail, double-res text)")
 	fs.StringVar(&opts.cpuProfile, "cpuprofile", "", "write CPU profile to file")
@@ -415,6 +419,9 @@ func run(args []string) error {
 	if opts.fps <= 0 {
 		return fmt.Errorf("fps must be positive, got %d", opts.fps)
 	}
+	if opts.startFrame < 0 {
+		return fmt.Errorf("start-frame must be non-negative, got %d", opts.startFrame)
+	}
 	if opts.kbps > 0 {
 		opts.bpp = opts.kbps * 1000 / 8 / opts.fps
 	}
@@ -482,7 +489,10 @@ func run(args []string) error {
 
 	textScale := opts.textScale
 	if textScale == 0 && opts.text != "" {
-		sampleText := yuv.FormatText(opts.text, 0, opts.fps)
+		// Size the auto-scale to the widest frame in the run (the last absolute
+		// frame number has the most digits), so -start-frame / large counters
+		// still fit.
+		sampleText := yuv.FormatText(opts.text, opts.startFrame+opts.numFrames-1, opts.fps)
 		if opts.blockSize == 8 {
 			textScale = yuv.AutoTextScale2x(sampleText, mbWidth*2, mbHeight*2)
 		} else {
@@ -686,7 +696,7 @@ func generateH264(opts *options, frameW, frameH, mbWidth, mbHeight, disableDeblo
 		maxRef = 1
 	}
 
-	plane, err := buildFrameGrid(0, patGrid, patColors,
+	plane, err := buildFrameGrid(opts.startFrame, patGrid, patColors,
 		mbWidth, mbHeight, textScale, opts.fps, opts.text, bg, fg, textBg, tiled, opts.blockSize, opts.bgPlane)
 	if err != nil {
 		return err
@@ -752,7 +762,7 @@ func withPicTiming(opts *options, frameIdx int, slice []byte) ([]byte, error) {
 	if !opts.picTiming {
 		return slice, nil
 	}
-	h, m, s, fr := yuv.TimecodeComponents(frameIdx, opts.fps)
+	h, m, s, fr := yuv.TimecodeComponents(opts.startFrame+frameIdx, opts.fps)
 	seiNALU, err := encode.GeneratePicTimingSEI(
 		encode.PicTimingConfig{PicStructPresent: true},
 		encode.PicTiming{Hours: uint8(h), Minutes: uint8(m), Seconds: uint8(s), Frames: uint8(fr)})
@@ -782,7 +792,7 @@ func generateH264AllIDR(f io.Writer, opts *options, frameW, frameH, mbWidth, mbH
 	textScale int, textBg *yuv.Color, cs yuv.ColorSpace, rng yuv.Range) error {
 
 	for i := range opts.numFrames {
-		plane, err := buildFrameGrid(i, patGrid, patColors,
+		plane, err := buildFrameGrid(opts.startFrame+i, patGrid, patColors,
 			mbWidth, mbHeight, textScale, opts.fps, opts.text, bg, fg, textBg, tiled, opts.blockSize, opts.bgPlane)
 		if err != nil {
 			return err
@@ -823,7 +833,7 @@ func generateH264WithPSkip(f io.Writer, opts *options, mbWidth, mbHeight int,
 
 	for i := range opts.numFrames {
 		if i%opts.idrInterval == 0 {
-			plane, err := buildFrameGrid(i, patGrid, patColors,
+			plane, err := buildFrameGrid(opts.startFrame+i, patGrid, patColors,
 				mbWidth, mbHeight, textScale, opts.fps, opts.text, bg, fg, textBg, tiled, opts.blockSize, opts.bgPlane)
 			if err != nil {
 				return err
@@ -904,7 +914,7 @@ func generateMP4(opts *options, frameW, frameH, mbWidth, mbHeight, disableDebloc
 	}
 
 	// Create encoder for frame generation
-	plane, err := buildFrameGrid(0, patGrid, patColors,
+	plane, err := buildFrameGrid(opts.startFrame, patGrid, patColors,
 		mbWidth, mbHeight, textScale, opts.fps, opts.text, bg, fg, textBg, tiled, opts.blockSize, opts.bgPlane)
 	if err != nil {
 		return err
@@ -935,7 +945,7 @@ func generateMP4(opts *options, frameW, frameH, mbWidth, mbHeight, disableDebloc
 		frameNum := uint32(0)
 		for i := range opts.numFrames {
 			if i%opts.idrInterval == 0 {
-				pg, err := buildFrameGrid(i, patGrid, patColors,
+				pg, err := buildFrameGrid(opts.startFrame+i, patGrid, patColors,
 					mbWidth, mbHeight, textScale, opts.fps, opts.text, bg, fg,
 					textBg, tiled, opts.blockSize, opts.bgPlane)
 				if err != nil {
@@ -972,7 +982,7 @@ func generateMP4(opts *options, frameW, frameH, mbWidth, mbHeight, disableDebloc
 		}
 	} else {
 		for i := range opts.numFrames {
-			pg, err := buildFrameGrid(i, patGrid, patColors,
+			pg, err := buildFrameGrid(opts.startFrame+i, patGrid, patColors,
 				mbWidth, mbHeight, textScale, opts.fps, opts.text, bg, fg, textBg, tiled, opts.blockSize, opts.bgPlane)
 			if err != nil {
 				return err
@@ -1001,8 +1011,10 @@ func generateMP4(opts *options, frameW, frameH, mbWidth, mbHeight, disableDebloc
 		}
 	}
 
-	// Write samples as fragmented MP4
-	seqNum := uint32(1)
+	// Write samples as fragmented MP4. start-frame offsets the media timeline
+	// (sample decode times) and the fragment sequence numbers so independently
+	// generated segments concatenate continuously.
+	seqNum := uint32(opts.startFrame/opts.fragDur) + 1
 	for fragStart := 0; fragStart < len(samples); fragStart += opts.fragDur {
 		fragEnd := min(fragStart+opts.fragDur, len(samples))
 
@@ -1024,7 +1036,7 @@ func generateMP4(opts *options, frameW, frameH, mbWidth, mbHeight, disableDebloc
 					Size:                  uint32(len(sampleData)),
 					CompositionTimeOffset: 0,
 				},
-				DecodeTime: uint64(i),
+				DecodeTime: uint64(opts.startFrame + i),
 				Data:       sampleData,
 			})
 		}
@@ -1069,7 +1081,7 @@ func generateY4M(opts *options, frameW, frameH, mbWidth, mbHeight int,
 	}
 
 	for i := range opts.numFrames {
-		pg, err := buildFrameGrid(i, patGrid, patColors,
+		pg, err := buildFrameGrid(opts.startFrame+i, patGrid, patColors,
 			mbWidth, mbHeight, textScale, opts.fps, opts.text, bg, fg, textBg, tiled, opts.blockSize, opts.bgPlane)
 		if err != nil {
 			return err
@@ -1095,7 +1107,7 @@ func generateFormattedImages(opts *options, frameW, frameH, mbWidth, mbHeight in
 	isJPEG := ext == ".jpg" || ext == ".jpeg"
 
 	for i := range opts.numFrames {
-		pg, err := buildFrameGrid(i, patGrid, patColors,
+		pg, err := buildFrameGrid(opts.startFrame+i, patGrid, patColors,
 			mbWidth, mbHeight, textScale, opts.fps, opts.text, bg, fg, textBg, tiled, opts.blockSize, opts.bgPlane)
 		if err != nil {
 			return err
@@ -1136,7 +1148,7 @@ func generateYUV(opts *options, frameW, frameH, mbWidth, mbHeight int,
 	defer f.Close()
 
 	for i := range opts.numFrames {
-		pg, err := buildFrameGrid(i, patGrid, patColors,
+		pg, err := buildFrameGrid(opts.startFrame+i, patGrid, patColors,
 			mbWidth, mbHeight, textScale, opts.fps, opts.text, bg, fg, textBg, tiled, opts.blockSize, opts.bgPlane)
 		if err != nil {
 			return err
@@ -1161,7 +1173,7 @@ func generateNumberedImages(opts *options, frameW, frameH, mbWidth, mbHeight int
 	isJPEG := ext == ".jpg" || ext == ".jpeg"
 
 	for i := range opts.numFrames {
-		pg, err := buildFrameGrid(i, patGrid, patColors,
+		pg, err := buildFrameGrid(opts.startFrame+i, patGrid, patColors,
 			mbWidth, mbHeight, textScale, opts.fps, opts.text, bg, fg, textBg, tiled, opts.blockSize, opts.bgPlane)
 		if err != nil {
 			return err
