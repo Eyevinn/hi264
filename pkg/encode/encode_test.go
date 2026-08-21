@@ -2,9 +2,12 @@ package encode
 
 import (
 	"bytes"
+	"fmt"
+	"math/rand"
 	"testing"
 
 	"github.com/Eyevinn/hi264/pkg/decoder"
+	"github.com/Eyevinn/hi264/pkg/frame"
 	"github.com/Eyevinn/hi264/pkg/yuv"
 	"github.com/Eyevinn/mp4ff/avc"
 )
@@ -774,5 +777,108 @@ func TestEncodeRefactorEquivalence(t *testing.T) {
 				t.Errorf("Encode() != EncodeSPSPPS+EncodeSlice (len %d vs %d)", len(full), buf.Len())
 			}
 		})
+	}
+}
+
+// TestEntropyCoderAgreementPlane encodes detailed, photo-like PlaneGrid content
+// with both entropy coders and requires the decoded frames to be pixel-identical.
+// CAVLC and CABAC carry the same quantized coefficients, so any disagreement means
+// one of them serializes them wrongly.
+//
+// This is the invariant that a reversed trailing_ones_sign_flag broke: CAVLC
+// permuted the signs of mixed-sign trailing-one pairs while CABAC (which emits
+// each sign next to its own level) stayed correct. Flat single-colour grids never
+// produce such a pair, so the content here deliberately varies every block.
+func TestEntropyCoderAgreementPlane(t *testing.T) {
+	for _, blockSize := range []int{16, 8} {
+		for _, qp := range []int{12, 20, 26, 34, 42} {
+			for _, skipDeblock := range []bool{true, false} {
+				name := fmt.Sprintf("block%d/qp%d/deblock=%v", blockSize, qp, !skipDeblock)
+				t.Run(name, func(t *testing.T) {
+					pg := detailedPlaneGrid(12, 8, blockSize)
+					p := EncodeParams{
+						Width:  pg.PixelWidth(),
+						Height: pg.PixelHeight(),
+						QP:     qp,
+					}
+
+					decoded := make([]*frame.Frame, 0, 2)
+					for _, useCABAC := range []bool{false, true} {
+						p.CABAC = useCABAC
+						spsData, err := GenerateSPS(p)
+						if err != nil {
+							t.Fatalf("GenerateSPS: %v", err)
+						}
+						ppsData, err := GeneratePPS(p)
+						if err != nil {
+							t.Fatalf("GeneratePPS: %v", err)
+						}
+						idr, err := GenerateIDRFromPlane(p, pg, 0)
+						if err != nil {
+							t.Fatalf("GenerateIDRFromPlane(cabac=%v): %v", useCABAC, err)
+						}
+
+						var buf bytes.Buffer
+						buf.Write(spsData)
+						buf.Write(ppsData)
+						buf.Write(idr)
+
+						dec := decoder.New()
+						dec.SkipDeblock = skipDeblock
+						f, err := dec.DecodeNALUs(avc.ExtractNalusFromByteStream(buf.Bytes()))
+						if err != nil {
+							t.Fatalf("decode(cabac=%v): %v", useCABAC, err)
+						}
+						decoded = append(decoded, f)
+					}
+
+					comparePlanes(t, "Y", decoded[0].Y, decoded[1].Y, decoded[0].StrideY)
+					comparePlanes(t, "Cb", decoded[0].Cb, decoded[1].Cb, decoded[0].StrideC)
+					comparePlanes(t, "Cr", decoded[0].Cr, decoded[1].Cr, decoded[0].StrideC)
+				})
+			}
+		}
+	}
+}
+
+// detailedPlaneGrid builds a PlaneGrid where every block differs from its
+// neighbours, so the residuals exercise a wide range of coefficient patterns.
+func detailedPlaneGrid(w, h, blockSize int) *yuv.PlaneGrid {
+	pg := yuv.NewPlaneGrid(w, h, blockSize)
+	rng := rand.New(rand.NewSource(0xC0FFEE))
+	for y := range h {
+		for x := range w {
+			// A smooth ramp keeps neighbouring blocks close enough that the
+			// encoder picks all three I_16x16 prediction modes, plus jitter so
+			// the quantized coefficients are not trivially predictable.
+			ramp := 16 + (200*(x+y))/(w+h)
+			pg.Y[y][x] = clampToU8(ramp + rng.Intn(31) - 15)
+			pg.Cb[y][x] = clampToU8(128 + (90*(x-w/2))/w + rng.Intn(15) - 7)
+			pg.Cr[y][x] = clampToU8(128 + (90*(y-h/2))/h + rng.Intn(15) - 7)
+		}
+	}
+	return pg
+}
+
+func clampToU8(v int) uint8 {
+	if v < 0 {
+		return 0
+	}
+	if v > 255 {
+		return 255
+	}
+	return uint8(v)
+}
+
+func comparePlanes(t *testing.T, name string, cavlc, cabac []uint8, stride int) {
+	t.Helper()
+	if len(cavlc) != len(cabac) {
+		t.Fatalf("%s: plane length %d (CAVLC) vs %d (CABAC)", name, len(cavlc), len(cabac))
+	}
+	for i := range cavlc {
+		if cavlc[i] != cabac[i] {
+			t.Fatalf("%s: CAVLC and CABAC decode differently at (%d,%d): %d vs %d",
+				name, i%stride, i/stride, cavlc[i], cabac[i])
+		}
 	}
 }
