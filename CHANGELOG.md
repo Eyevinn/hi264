@@ -44,6 +44,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `hi264-mp4-extend`: appended frames continue the source's pic_timing timecodes
   when the source SPS signals `pic_struct_present_flag` (non-HRD streams).
 
+### Fixed
+- CAVLC `trailing_ones_sign_flag` order: the encoder emitted the sign flags for the trailing ones in reverse. `levels` is collected in reverse scan order, which is already the transmission order (spec 7.3.5.3.2), so the flags must be written front to back. Blocks with two or three trailing ones of mixed sign decoded with those coefficients' signs permuted. For chroma DC this transposes the 2x2 DC array (the TR/BL sub-blocks pick up equal and opposite errors), and since chroma is coded DC-only the error could not be corrected and fed the next macroblock's intra chroma prediction — showing up as colour bleeding streaking down and to the right on PNG/JPEG input. Flat `.gridimg` patterns were unaffected because a single DC coefficient never produces a mixed-sign trailing-one pair.
+
 ### Documentation
 - Document `hi264gen -text` format specifiers (`%d`/`%Nd`/`%0Nd`, `%hh`/`%mm`/`%ss`/`%ff`/`%ms`, `%%`, `\n`) in both the README and the CLI help text, with copy-pasteable examples for counters, SMPTE timecode, millisecond timestamps, and multi-line overlays.
 
