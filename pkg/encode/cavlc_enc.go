@@ -226,8 +226,10 @@ func EncodeResidualBlock(w *BitWriter, coeffs []int32, nC, maxNumCoeff int) int 
 	// 1. Write coeff_token
 	writeCoeffToken(w, totalCoeff, trailingOnes, nC, maxNumCoeff)
 
-	// 2. Write trailing ones sign flags (in reverse order: last T1 first)
-	for i := trailingOnes - 1; i >= 0; i-- {
+	// 2. Write trailing_ones_sign_flag for each trailing one.
+	// levels is already in reverse scan order (highest scan position first),
+	// which is the order the sign flags are transmitted in (section 7.3.5.3.2).
+	for i := range trailingOnes {
 		if levels[i] < 0 {
 			w.WriteBit(1)
 		} else {
