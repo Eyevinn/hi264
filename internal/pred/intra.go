@@ -2,6 +2,8 @@
 // as specified in sections 8.3.1 through 8.3.4 of the standard.
 package pred
 
+import "fmt"
+
 // Intra16x16 prediction mode constants.
 const (
 	Intra16x16Vertical   = 0
@@ -35,17 +37,23 @@ const (
 // top: 16 samples from the row above (nil if not available).
 // left: 16 samples from the column to the left (nil if not available).
 // topLeft: the sample at position (-1, -1) (only needed for Plane mode).
-func Predict16x16(mode int, top, left []uint8, topLeft uint8) [16][16]uint8 {
+func Predict16x16(mode int, top, left []uint8, topLeft uint8) ([16][16]uint8, error) {
 	var pred [16][16]uint8
 
 	switch mode {
 	case Intra16x16Vertical:
+		if top == nil {
+			return pred, fmt.Errorf("intra16x16 vertical prediction requires top neighbor")
+		}
 		for y := range 16 {
 			for x := range 16 {
 				pred[y][x] = top[x]
 			}
 		}
 	case Intra16x16Horizontal:
+		if left == nil {
+			return pred, fmt.Errorf("intra16x16 horizontal prediction requires left neighbor")
+		}
 		for y := range 16 {
 			for x := range 16 {
 				pred[y][x] = left[y]
@@ -79,6 +87,9 @@ func Predict16x16(mode int, top, left []uint8, topLeft uint8) [16][16]uint8 {
 			}
 		}
 	case Intra16x16Plane:
+		if top == nil || left == nil {
+			return pred, fmt.Errorf("intra16x16 plane prediction requires top and left neighbors")
+		}
 		iH := 0
 		iV := 0
 		for x := range 8 {
@@ -111,7 +122,7 @@ func Predict16x16(mode int, top, left []uint8, topLeft uint8) [16][16]uint8 {
 		}
 	}
 
-	return pred
+	return pred, nil
 }
 
 // Predict4x4 generates a 4x4 prediction block (section 8.3.1).

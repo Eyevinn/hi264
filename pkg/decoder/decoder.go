@@ -16,6 +16,10 @@ import (
 	"github.com/Eyevinn/hi264/pkg/frame"
 )
 
+// maxFrameSizeInMbs is the largest frame size in macroblocks defined by any
+// H.264 level (5.2). It bounds allocations sized from untrusted SPS dimensions.
+const maxFrameSizeInMbs = 139264
+
 // Decoder is the H.264/AVC decoder.
 type Decoder struct {
 	spsMap      map[uint32]*avc.SPS
@@ -440,6 +444,15 @@ func (d *Decoder) decodeIDR(nalu []byte) (*frame.Frame, error) {
 	mbWidth := (width + 15) / 16
 	mbHeight := (height + 15) / 16
 
+	// The picture dimensions come from the SPS (untrusted input); reject a
+	// frame whose macroblock count exceeds the largest defined H.264 level
+	// (5.2, MaxFrameSizeInMbs = 139264) before it is used to size per-macroblock
+	// allocations, otherwise a crafted SPS can request a huge allocation.
+	if mbWidth <= 0 || mbHeight <= 0 || mbWidth*mbHeight > maxFrameSizeInMbs {
+		return nil, fmt.Errorf("frame size %dx%d mbs exceeds maximum %d",
+			mbWidth, mbHeight, maxFrameSizeInMbs)
+	}
+
 	// Calculate slice QP
 	sliceQPY := 26 + int(pps.PicInitQpMinus26) + int(sh.SliceQPDelta)
 
@@ -583,7 +596,10 @@ func reconstructI16x16(sc *slice.SliceContext, f *frame.Frame,
 	if hasLeft {
 		leftSlice = left[:]
 	}
-	predBlock := pred.Predict16x16(mb.IntraPredMode16x16, topSlice, leftSlice, topLeft)
+	predBlock, err := pred.Predict16x16(mb.IntraPredMode16x16, topSlice, leftSlice, topLeft)
+	if err != nil {
+		return err
+	}
 
 	// 2. Inverse transform DC coefficients
 	// DC coefficients from CABAC are in zigzag scan order; Hadamard expects raster (row-major)
