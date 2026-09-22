@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+#### Streaming extension (`encode.PSkipExtender`)
+- `encode.PSkipExtender`: continues a stream with P_Skip frames, tracking
+  frame_num and the picture order count as access units go past, so a live
+  pipeline can cover a stalled source without holding the whole bitstream.
+  Construct with `NewPSkipExtender`/`NewPSkipExtenderFromDecConfRec`, feed with
+  `ObserveNALU`/`ObserveAVCCSample`/`ObserveAnnexB`, generate with
+  `NextSlice`/`NextSlices`.
+
+### Fixed
+- `AppendPSkipFrames` and `hi264-mp4-extend` continued from the last coded
+  slice, which breaks on a source with B frames: frame_num advances only over
+  reference pictures, and the picture order count must continue from the highest
+  value in the stream, not from the last picture in decode order. Both now go
+  through `PSkipExtender`. Shows up on a stream cut mid-reorder, as a live
+  pipeline has; a complete stream ends on a reference picture.
+- Docs: `pic_order_cnt_type` 2 and `weighted_pred_flag=1` were described as
+  unsupported; both have been supported.
+
 #### Picture Timing SEI (pic_timing)
 - `encode.GeneratePicTimingSEI` / `encode.BuildPicTimingSEINALU`: build an
   H.264 Picture Timing SEI NAL unit (payload type 1) carrying a progressive-frame

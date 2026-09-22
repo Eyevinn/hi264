@@ -120,8 +120,11 @@ func extendSegment(initPath, inSegPath, outSegPath string, count uint32, blackID
 		return fmt.Errorf("could not determine sample duration from input segment")
 	}
 
-	lastFn, lastLsb, err := encode.LastFrameState(annexB.Bytes())
+	ext, err := encode.NewPSkipExtender(sps, pps)
 	if err != nil {
+		return fmt.Errorf("prepare extension: %w", err)
+	}
+	if err := ext.ObserveAnnexB(annexB.Bytes()); err != nil {
 		return fmt.Errorf("inspect input tail: %w", err)
 	}
 
@@ -140,8 +143,6 @@ func extendSegment(initPath, inSegPath, outSegPath string, count uint32, blackID
 
 	newSamples := make([]mp4.FullSample, 0, count)
 	nextDecodeTime := nextDecodeTimeAfter(segParsed)
-	cursorFn := lastFn
-	cursorLsb := lastLsb
 	remaining := count
 
 	// If the source SPS signals pic_struct_present_flag (and no HRD), continue
@@ -190,15 +191,15 @@ func extendSegment(initPath, inSegPath, outSegPath string, count uint32, blackID
 			Data:       nalu,
 		})
 		nextDecodeTime += uint64(sampleDur)
-		cursorFn = 0 // IDR resets POC tracking in the decoder
-		cursorLsb = 0
+		// Feeding the IDR back in resets the tracked numbering, as it does in a decoder.
+		if err := ext.ObserveAnnexB(idrAnnexB); err != nil {
+			return fmt.Errorf("track black IDR: %w", err)
+		}
 		remaining--
 	}
 
 	for i := uint32(0); i < remaining; i++ {
-		fn := cursorFn + 1 + i
-		lsb := cursorLsb + 2 + 2*i
-		pSkipAnnexB, err := encode.EncodePSkipSlice(sps, pps, fn, lsb, 0)
+		pSkipAnnexB, err := ext.NextSlice()
 		if err != nil {
 			return fmt.Errorf("encode P_Skip %d: %w", i, err)
 		}
