@@ -7,19 +7,23 @@ import (
 )
 
 // LastFrameState returns the (frame_num, pic_order_cnt_lsb) of the last slice
-// in an Annex-B bitstream. Useful for picking continuation values when
-// extending an existing stream with EncodePSkipSlice. For the common case of
-// appending one or more empty frames, AppendPSkipFrames wraps this whole flow
-// into a single call.
+// in an Annex-B bitstream, exactly as coded.
 //
-// The returned values are taken from the very last coded slice (regardless of
-// reference flag). When appending one P_Skip you typically want
+// The values are taken from the very last coded slice regardless of its
+// reference flag, which makes them the wrong basis for a continuation when the
+// stream ends on a non-reference picture or when an earlier picture has a
+// higher picture order count, as happens in a stream with B frames. Use
+// AppendPSkipFrames or PSkipExtender, which follow the reference structure, unless
+// you specifically want the raw last-slice values:
 //
 //	frameNum, picOrderCntLsb, _ := encode.LastFrameState(stream)
 //	pSkip, _ := encode.EncodePSkipSlice(sps, pps, frameNum+1, picOrderCntLsb+2, 0)
 //
-// Returns an error if the stream has no slices, or if the SPS uses
-// pic_order_cnt_type != 0 (the only type supported by EncodePSkipSlice).
+// Returns an error if the stream has no slices, or if the SPS uses a
+// pic_order_cnt_type other than 0 or 2 (the types EncodePSkipSlice supports).
+//
+// For a live stream, where the history is not available and the numbering has
+// to be tracked as access units go past, use PSkipExtender instead.
 func LastFrameState(annexB []byte) (frameNum uint32, picOrderCntLsb uint32, err error) {
 	nalus := avc.ExtractNalusFromByteStream(annexB)
 	spsMap := make(map[uint32]*avc.SPS)
@@ -72,10 +76,18 @@ func LastFrameState(annexB []byte) (frameNum uint32, picOrderCntLsb uint32, err 
 //
 // Returns the concatenated stream (original bytes + appended slices).
 // Requires the source to contain at least one SPS, one PPS, and one slice,
-// and the SPS to use pic_order_cnt_type=0. Slices use disable_deblocking=0.
+// and the SPS to use pic_order_cnt_type 0 or 2. Slices use disable_deblocking=0.
 //
-// For more control (custom frame_num, custom POC stride, custom deblocking),
-// use LastFrameState + EncodePSkipSlice directly.
+// The continuation follows the stream's reference structure: frame_num advances
+// over the last reference picture (a trailing non-reference picture does not
+// move it) and the picture order count continues from the highest value in the
+// stream, which in a stream with B frames is not the last picture in decode
+// order. Both wrap at their SPS-defined maxima.
+//
+// For a live stream, where the history is not available, use PSkipExtender, which
+// tracks the same state as access units go past. For more control (custom
+// frame_num, custom POC stride, custom deblocking), use LastFrameState +
+// EncodePSkipSlice directly.
 func AppendPSkipFrames(annexB []byte, count uint32) ([]byte, error) {
 	if count == 0 {
 		return annexB, nil
@@ -84,17 +96,20 @@ func AppendPSkipFrames(annexB []byte, count uint32) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	lastFn, lastLsb, err := LastFrameState(annexB)
+	ext, err := NewPSkipExtender(sps, pps)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("AppendPSkipFrames: %w", err)
+	}
+	if err := ext.ObserveAnnexB(annexB); err != nil {
+		return nil, fmt.Errorf("AppendPSkipFrames: %w", err)
+	}
+	slices, err := ext.NextSlices(int(count))
+	if err != nil {
+		return nil, fmt.Errorf("AppendPSkipFrames: %w", err)
 	}
 	out := make([]byte, len(annexB), len(annexB)+int(count)*64)
 	copy(out, annexB)
-	for i := range count {
-		pSkip, err := EncodePSkipSlice(sps, pps, lastFn+1+i, lastLsb+2+2*i, 0)
-		if err != nil {
-			return nil, fmt.Errorf("AppendPSkipFrames: %w", err)
-		}
+	for _, pSkip := range slices {
 		out = append(out, pSkip...)
 	}
 	return out, nil

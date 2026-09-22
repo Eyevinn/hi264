@@ -550,6 +550,43 @@ for i := uint32(1); i <= 30; i++ {
 }
 ```
 
+#### Continuing a live stream
+
+`AppendPSkipFrames` needs the whole bitstream, which a live pipeline does
+not have: it sees access units go past once and has to cover a gap the
+moment its source stalls. `PSkipExtender` tracks the numbering incrementally
+instead, so it can be asked for continuation frames at any point.
+
+```go
+ext, _ := encode.NewPSkipExtenderFromDecConfRec(avcC) // or NewPSkipExtender(sps, pps)
+
+for _, au := range accessUnits {                 // every real access unit
+    _ = ext.ObserveAVCCSample(au)                // or ObserveAnnexB / ObserveNALU
+}
+
+filler, _ := ext.NextSlices(25)                  // one second at 25 fps
+```
+
+The generated slices are reference pictures that freeze the last decoded
+picture, a few dozen bytes each, so holding an RTMP or SRT contribution
+open through a source outage costs on the order of 10 kbit/s.
+
+Two things stay with the caller:
+
+- **Timing.** Place the first generated frame after the highest
+  presentation time the source reached, not merely after its last decode
+  time. With B frames those differ by the reorder delay, and a frame
+  placed between them is displayed out of order.
+- **Resuming.** Real video must resume at an IDR. The generated frames
+  advance frame\_num and the picture order count past what the source
+  encoder will emit next, and only an IDR resets both.
+
+`PSkipExtender` and `AppendPSkipFrames` share this logic, so both handle a
+source containing B frames. It matters when extending a stream that was
+cut mid-reorder, which is what a live pipeline has: a complete stream from
+an encoder always ends on a reference picture, but a stream interrupted
+part-way through a group of pictures often does not.
+
 #### Lower-level building blocks
 
 `AppendPSkipFrames` is built on two primitives, useful when you need
@@ -563,9 +600,16 @@ multiple sources):
   picOrderCntLsb is masked to the SPS-defined width, so wrap-around is
   handled by the decoder.
 
-Limitations: `pic_order_cnt_type=0` only (types 1 and 2 unsupported);
-PPS settings that require `pred_weight_table()` (e.g.
-`weighted_pred_flag=1`) are out of scope.
+Limitations: `pic_order_cnt_type` 0 and 2 are supported, type 1 is not;
+interlaced streams (`frame_mbs_only_flag=0`) are out of scope.
+
+`LastFrameState` reports the last coded slice as coded, regardless of its
+reference flag, so it is not the right basis for a continuation when a
+stream ends on a non-reference picture or when an earlier picture holds a
+higher picture order count. `AppendPSkipFrames` and `PSkipExtender` both
+follow the reference structure instead: frame\_num advances only over
+reference pictures, and the picture order count continues from the
+highest value seen.
 
 ## Architecture
 

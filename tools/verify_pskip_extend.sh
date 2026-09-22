@@ -18,6 +18,10 @@
 #        - decoded frame count == base count + N,
 #        - ffprobe agrees on the frame count.
 #
+# The last case instead cuts a B-frame source mid-reorder and checks the
+# appended slice headers directly (extend_pskip -verify): ffmpeg tolerates both
+# a frame_num gap and a duplicated POC, so a decode cannot see that defect.
+#
 # Usage: bash tools/verify_pskip_extend.sh
 #
 # Prerequisites: ffmpeg, ffprobe, go (and x264 for the B-frame case)
@@ -177,6 +181,49 @@ if command -v x264 >/dev/null; then
     echo
 else
     echo "=== Skipped: x264_bframes (x264 not on PATH) ==="
+    echo
+fi
+
+# The same source cut mid-reorder, which is the shape a live pipeline has: the
+# tail is then a non-reference picture whose frame_num the continuation must not
+# count, and an earlier picture holds a higher POC. A complete stream from an
+# encoder always ends on a reference picture, so the case above never sees this.
+# ffmpeg decodes either version without complaint, so -verify asserts on the
+# emitted slice headers; the decode below only guards against gross breakage.
+if command -v x264 >/dev/null; then
+    echo "=== Test: x264_bframes_cut (cut mid-reorder, append 5 P_Skip) ==="
+    cut_src="$TMPDIR/x264_cut_src.264"
+    cut_ext="$TMPDIR/x264_cut_ext.264"
+    cut_log="$TMPDIR/x264_cut.out"
+    x264 --quiet --weightp 0 --frames 12 --bframes 2 --b-pyramid none --keyint 12 \
+        --output "$cut_src" --input-res 176x80 --fps 25 /dev/zero
+    if ! go run ./tools/extend_pskip -cut-at-non-ref -verify \
+            "$cut_src" "$cut_ext" 5 >"$cut_log" 2>&1; then
+        echo "FAIL: appended frames do not continue the cut stream:"
+        sed 's/^/    /' "$cut_log"
+        FAIL=$((FAIL+1))
+    else
+        grep -v '^extended_slices=' "$cut_log" | sed 's/^/  /'
+        ext_slices=$(sed -n 's/^extended_slices=//p' "$cut_log")
+        ext_result=$(decode_with_ffmpeg "$cut_ext")
+        ext_frames=${ext_result%%|*}
+        ext_err=${ext_result#*|}
+        if [ -n "$ext_err" ]; then
+            echo "FAIL: extended stream produced ffmpeg errors:"
+            echo "$ext_err" | sed 's/^/    /'
+            FAIL=$((FAIL+1))
+        elif [ "$ext_frames" -ne "$ext_slices" ]; then
+            echo "FAIL: extended stream decoded $ext_frames frames, want $ext_slices"
+            FAIL=$((FAIL+1))
+        else
+            echo "  extended: $ext_frames frames, ffmpeg clean"
+            echo "  PASS"
+            PASS=$((PASS+1))
+        fi
+    fi
+    echo
+else
+    echo "=== Skipped: x264_bframes_cut (x264 not on PATH) ==="
     echo
 fi
 
