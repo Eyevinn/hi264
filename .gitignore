@@ -27,4 +27,25 @@ venv/
 .venv/
 
 # Compiled binaries
+/hi264gen
+/hi264dec
 cmd/hi264gen/hi264gen
+cmd/hi264dec/hi264dec
+
+# Generated media from ad-hoc tool runs (repo root and next to the commands).
+# Anchored so tracked assets under images/ and testdata/ are unaffected.
+/*.mp4
+/*.m4s
+/*.264
+/*.y4m
+/*.yuv
+/*.jpg
+/*.png
+# Generated media from ad-hoc tool runs next to the commands
+cmd/**/*.mp4
+cmd/**/*.m4s
+cmd/**/*.264
+cmd/**/*.y4m
+cmd/**/*.yuv
+cmd/**/*.jpg
+cmd/**/*.png
