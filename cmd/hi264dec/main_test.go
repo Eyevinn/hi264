@@ -190,6 +190,30 @@ func TestDecodeInfoOnly(t *testing.T) {
 	}
 }
 
+// TestDecodeInfoMalformedNALUs checks that the NALU listing handles an empty
+// NALU and an SPS that fails to parse, instead of panicking.
+func TestDecodeInfoMalformedNALUs(t *testing.T) {
+	dir := t.TempDir()
+	bs, err := os.ReadFile(generateTestBitstream(t, dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.HasPrefix(bs, []byte{0, 0, 0, 1}) {
+		t.Fatalf("expected a 4-byte start code, got % x", bs[:4])
+	}
+	// 00 00 01 00 00 01 gives an empty first NALU, and an SPS cut after
+	// profile_idc, placed after the IDR, fails to parse.
+	data := append([]byte{0, 0, 1}, bs[1:]...)
+	data = append(data, 0, 0, 0, 1, 0x67, 0x42)
+	input := filepath.Join(dir, "malformed.264")
+	if err := os.WriteFile(input, data, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := run([]string{appName, input}); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+}
+
 func TestDecodeNoDeblock(t *testing.T) {
 	dir := t.TempDir()
 	input := generateTestBitstream(t, dir)

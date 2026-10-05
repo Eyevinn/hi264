@@ -452,40 +452,54 @@ func printNALUInfo(nalus [][]byte) {
 	ppsMap := make(map[uint32]*avc.PPS)
 
 	for i, nalu := range nalus {
+		if len(nalu) == 0 { // e.g. from adjacent start codes
+			fmt.Printf("  NALU %d: empty\n", i)
+			continue
+		}
 		naluType := avc.NaluType(nalu[0] & 0x1f)
 		fmt.Printf("  NALU %d: type=%d (%s), size=%d bytes\n", i, naluType, naluTypeName(naluType), len(nalu))
 	}
 
+	// A parse error, such as an out-of-range value, is printed instead of the fields.
 	for _, nalu := range nalus {
+		if len(nalu) == 0 {
+			continue
+		}
 		naluType := avc.NaluType(nalu[0] & 0x1f)
 		switch naluType {
 		case avc.NALU_SPS:
-			sps, _ := avc.ParseSPSNALUnit(nalu, true)
-			if sps != nil {
-				spsMap[sps.ParameterID] = sps
-				fmt.Printf("  SPS: %dx%d, profile=%d, level=%d, chromaFmt=%d, bitDepthY=%d, transform8x8=%v\n",
-					sps.Width, sps.Height, sps.Profile, sps.Level, sps.ChromaFormatIDC,
-					8+sps.BitDepthLumaMinus8, sps.SeqScalingMatrixPresentFlag)
+			sps, err := avc.ParseSPSNALUnit(nalu, true)
+			if err != nil {
+				fmt.Printf("  SPS: %v\n", err)
+				continue
 			}
+			spsMap[sps.ParameterID] = sps
+			fmt.Printf("  SPS: %dx%d, profile=%d, level=%d, chromaFmt=%d, bitDepthY=%d, transform8x8=%v\n",
+				sps.Width, sps.Height, sps.Profile, sps.Level, sps.ChromaFormatIDC,
+				8+sps.BitDepthLumaMinus8, sps.SeqScalingMatrixPresentFlag)
 		case avc.NALU_PPS:
-			pps, _ := avc.ParsePPSNALUnit(nalu, spsMap)
-			if pps != nil {
-				ppsMap[pps.PicParameterSetID] = pps
-				fmt.Printf("  PPS: entropy=%v, transform8x8=%v, picInitQpMinus26=%d, chromaQpOffset=%d\n",
-					pps.EntropyCodingModeFlag, pps.Transform8x8ModeFlag,
-					pps.PicInitQpMinus26, pps.ChromaQpIndexOffset)
+			pps, err := avc.ParsePPSNALUnit(nalu, spsMap)
+			if err != nil {
+				fmt.Printf("  PPS: %v\n", err)
+				continue
 			}
+			ppsMap[pps.PicParameterSetID] = pps
+			fmt.Printf("  PPS: entropy=%v, transform8x8=%v, picInitQpMinus26=%d, chromaQpOffset=%d\n",
+				pps.EntropyCodingModeFlag, pps.Transform8x8ModeFlag,
+				pps.PicInitQpMinus26, pps.ChromaQpIndexOffset)
 		case avc.NALU_IDR:
-			sh, _ := avc.ParseSliceHeader(nalu, spsMap, ppsMap)
-			if sh != nil {
-				fmt.Printf("  SliceHeader: size=%d, type=%d, qpDelta=%d, cabacInitIDC=%d\n",
-					sh.Size, sh.SliceType, sh.SliceQPDelta, sh.CabacInitIDC)
-				pps := ppsMap[sh.PicParamID]
-				sliceQPY := 26 + int(pps.PicInitQpMinus26) + int(sh.SliceQPDelta)
-				fmt.Printf("  SliceQPY = 26 + %d + %d = %d\n", pps.PicInitQpMinus26, sh.SliceQPDelta, sliceQPY)
-				end := min(sh.Size+10, uint32(len(nalu)))
-				fmt.Printf("  SliceData starts at byte %d: %s\n", sh.Size, hex.EncodeToString(nalu[sh.Size:end]))
+			sh, err := avc.ParseSliceHeader(nalu, spsMap, ppsMap)
+			if err != nil {
+				fmt.Printf("  SliceHeader: %v\n", err)
+				continue
 			}
+			fmt.Printf("  SliceHeader: size=%d, type=%d, qpDelta=%d, cabacInitIDC=%d\n",
+				sh.Size, sh.SliceType, sh.SliceQPDelta, sh.CabacInitIDC)
+			pps := ppsMap[sh.PicParamID]
+			sliceQPY := 26 + int(pps.PicInitQpMinus26) + int(sh.SliceQPDelta)
+			fmt.Printf("  SliceQPY = 26 + %d + %d = %d\n", pps.PicInitQpMinus26, sh.SliceQPDelta, sliceQPY)
+			end := min(sh.Size+10, uint32(len(nalu)))
+			fmt.Printf("  SliceData starts at byte %d: %s\n", sh.Size, hex.EncodeToString(nalu[sh.Size:end]))
 		}
 	}
 }
