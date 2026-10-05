@@ -17,16 +17,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ObserveNALU`/`ObserveAVCCSample`/`ObserveAnnexB`, generate with
   `NextSlice`/`NextSlices`.
 
-### Fixed
-- `AppendPSkipFrames` and `hi264-mp4-extend` continued from the last coded
-  slice, which breaks on a source with B frames: frame_num advances only over
-  reference pictures, and the picture order count must continue from the highest
-  value in the stream, not from the last picture in decode order. Both now go
-  through `PSkipExtender`. Shows up on a stream cut mid-reorder, as a live
-  pipeline has; a complete stream ends on a reference picture.
-- Docs: `pic_order_cnt_type` 2 and `weighted_pred_flag=1` were described as
-  unsupported; both have been supported.
-
 #### Picture Timing SEI (pic_timing)
 - `encode.GeneratePicTimingSEI` / `encode.BuildPicTimingSEINALU`: build an
   H.264 Picture Timing SEI NAL unit (payload type 1) carrying a progressive-frame
@@ -69,11 +59,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   plain `go build`; `internal/version.go` and the Makefile `-ldflags` are gone
 
 ### Fixed
+- `AppendPSkipFrames` and `hi264-mp4-extend` continued from the last coded
+  slice, which breaks on a source with B frames: frame_num advances only over
+  reference pictures, and the picture order count must continue from the highest
+  value in the stream, not from the last picture in decode order. Both now go
+  through `PSkipExtender`. Shows up on a stream cut mid-reorder, as a live
+  pipeline has; a complete stream ends on a reference picture.
 - `hi264dec`: no panic on an empty NAL unit (adjacent start codes), and the NALU
   listing prints SPS/PPS/slice-header parse errors instead of skipping them.
 - CAVLC `trailing_ones_sign_flag` order: the encoder emitted the sign flags for the trailing ones in reverse. `levels` is collected in reverse scan order, which is already the transmission order (spec 7.3.5.3.2), so the flags must be written front to back. Blocks with two or three trailing ones of mixed sign decoded with those coefficients' signs permuted. For chroma DC this transposes the 2x2 DC array (the TR/BL sub-blocks pick up equal and opposite errors), and since chroma is coded DC-only the error could not be corrected and fed the next macroblock's intra chroma prediction — showing up as colour bleeding streaking down and to the right on PNG/JPEG input. Flat `.gridimg` patterns were unaffected because a single DC coefficient never produces a mixed-sign trailing-one pair.
 
 ### Documentation
+- `pic_order_cnt_type` 2 and `weighted_pred_flag=1` were described as
+  unsupported; both have been supported.
 - Document `hi264gen -text` format specifiers (`%d`/`%Nd`/`%0Nd`, `%hh`/`%mm`/`%ss`/`%ff`/`%ms`, `%%`, `\n`) in both the README and the CLI help text, with copy-pasteable examples for counters, SMPTE timecode, millisecond timestamps, and multi-line overlays.
 
 ## [0.10.0] - 2026-05-07
