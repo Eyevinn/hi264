@@ -2,6 +2,7 @@ package encode
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 
 	"github.com/Eyevinn/mp4ff/avc"
@@ -370,6 +371,101 @@ func TestPSkipExtenderFollowsReferenceStructure(t *testing.T) {
 			t.Errorf("after an IDR: (%d, %d), want (1, 2)", sh.FrameNum, sh.PicOrderCntLsb)
 		}
 	})
+}
+
+// pSkipNALU returns a reference P_Skip slice as a NAL unit without start code.
+func pSkipNALU(t *testing.T, sps *avc.SPS, pps *avc.PPS, frameNum, pocLsb uint32) []byte {
+	t.Helper()
+	annexB, err := EncodePSkipSlice(sps, pps, frameNum, pocLsb, 1)
+	if err != nil {
+		t.Fatalf("EncodePSkipSlice: %v", err)
+	}
+	return avc.ExtractNalusFromByteStream(annexB)[0]
+}
+
+// TestPSkipExtenderJoinsMidStream covers a live pipeline that starts observing between IDRs: the
+// first slice it sees is a P slice, and the numbering continues from it.
+func TestPSkipExtenderJoinsMidStream(t *testing.T) {
+	sps, pps := mustParseSPSPPS(t, buildSourceStream(t, false))
+	ext, err := NewPSkipExtender(sps, pps)
+	if err != nil {
+		t.Fatalf("NewPSkipExtender: %v", err)
+	}
+	if err := ext.ObserveNALU(pSkipNALU(t, sps, pps, 5, 10)); err != nil {
+		t.Fatalf("ObserveNALU: %v", err)
+	}
+	if fn, poc := ext.State(); !ext.Ready() || fn != 5 || poc != 10 {
+		t.Fatalf("Ready = %v, State = (%d, %d), want true, (5, 10)", ext.Ready(), fn, poc)
+	}
+	if sh := nextSliceHeader(t, ext); sh.FrameNum != 6 || sh.PicOrderCntLsb != 12 {
+		t.Errorf("next slice (%d, %d), want (6, 12)", sh.FrameNum, sh.PicOrderCntLsb)
+	}
+}
+
+// TestPSkipExtenderDamagedInput checks that a NAL unit that does not parse is reported and leaves
+// the numbering unchanged, so a caller can drop a damaged access unit and keep observing.
+func TestPSkipExtenderDamagedInput(t *testing.T) {
+	source := buildSourceStream(t, false)
+	sps, pps := mustParseSPSPPS(t, source)
+	ext, err := NewPSkipExtender(sps, pps)
+	if err != nil {
+		t.Fatalf("NewPSkipExtender: %v", err)
+	}
+	if err := ext.ObserveAnnexB(source); err != nil {
+		t.Fatalf("ObserveAnnexB: %v", err)
+	}
+	if err := ext.ObserveNALU(pSkipNALU(t, sps, pps, 1, 2)); err != nil {
+		t.Fatalf("ObserveNALU: %v", err)
+	}
+
+	var spsNALU, ppsNALU []byte
+	for _, nalu := range avc.ExtractNalusFromByteStream(source) {
+		switch avc.GetNaluType(nalu[0]) {
+		case avc.NALU_SPS:
+			spsNALU = nalu
+		case avc.NALU_PPS:
+			ppsNALU = nalu
+		}
+	}
+	truncatedSlice := pSkipNALU(t, sps, pps, 2, 4)[:2]
+	cases := []struct {
+		name    string
+		observe func() error
+		wantErr string
+	}{
+		{"truncated slice", func() error { return ext.ObserveNALU(truncatedSlice) }, "parse slice header"},
+		{"truncated slice in Annex-B", func() error {
+			return ext.ObserveAnnexB(append([]byte{0, 0, 0, 1}, truncatedSlice...))
+		}, "parse slice header"},
+		{"bad AVCC length", func() error { return ext.ObserveAVCCSample([]byte{0, 0, 0, 9, 0x41}) },
+			"split access unit"},
+		{"truncated slice in AVCC sample", func() error {
+			return ext.ObserveAVCCSample(append([]byte{0, 0, 0, byte(len(truncatedSlice))}, truncatedSlice...))
+		}, "parse slice header"},
+		{"truncated SPS", func() error { return ext.ObserveNALU(spsNALU[:3]) }, "parse SPS"},
+		{"truncated PPS", func() error { return ext.ObserveNALU(ppsNALU[:1]) }, "parse PPS"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			err := c.observe()
+			if err == nil || !strings.Contains(err.Error(), c.wantErr) {
+				t.Fatalf("got error %v, want one containing %q", err, c.wantErr)
+			}
+			if fn, poc := ext.State(); fn != 1 || poc != 2 {
+				t.Errorf("State = (%d, %d) after the error, want (1, 2)", fn, poc)
+			}
+		})
+	}
+
+	if err := ext.ObserveNALU(nil); err != nil {
+		t.Errorf("an empty NAL unit: %v", err)
+	}
+	if err := ext.ObserveNALU(pSkipNALU(t, sps, pps, 2, 4)); err != nil {
+		t.Fatalf("ObserveNALU after the damaged units: %v", err)
+	}
+	if fn, poc := ext.State(); fn != 2 || poc != 4 {
+		t.Errorf("State = (%d, %d), want (2, 4)", fn, poc)
+	}
 }
 
 func TestPSkipExtenderErrors(t *testing.T) {

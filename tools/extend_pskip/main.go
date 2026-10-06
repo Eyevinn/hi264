@@ -18,6 +18,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"strconv"
 
@@ -35,65 +36,71 @@ type sliceInfo struct {
 }
 
 func main() {
-	cutAtNonRef := flag.Bool("cut-at-non-ref", false,
-		"truncate the input after its last non-reference picture before extending")
-	verify := flag.Bool("verify", false,
-		"check the appended slice headers continue the source correctly")
-	flag.Parse()
-
-	args := flag.Args()
-	if len(args) != 3 {
-		fmt.Fprintln(os.Stderr, "usage: extend_pskip [flags] <input.264> <output.264> <count>")
-		flag.PrintDefaults()
-		os.Exit(2)
+	if err := run(os.Args, os.Stdout); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
 	}
-	inPath, outPath := args[0], args[1]
-	count64, err := strconv.ParseUint(args[2], 10, 32)
+}
+
+func run(args []string, stdout io.Writer) error {
+	fs := flag.NewFlagSet("extend_pskip", flag.ContinueOnError)
+	cutAtNonRef := fs.Bool("cut-at-non-ref", false,
+		"truncate the input after its last non-reference picture before extending")
+	verify := fs.Bool("verify", false,
+		"check the appended slice headers continue the source correctly")
+	fs.Usage = func() {
+		fmt.Fprintln(fs.Output(), "usage: extend_pskip [flags] <input.264> <output.264> <count>")
+		fs.PrintDefaults()
+	}
+	if err := fs.Parse(args[1:]); err != nil {
+		return err
+	}
+	if fs.NArg() != 3 {
+		fs.Usage()
+		return fmt.Errorf("expected 3 positional arguments, got %d", fs.NArg())
+	}
+	inPath, outPath := fs.Arg(0), fs.Arg(1)
+	count64, err := strconv.ParseUint(fs.Arg(2), 10, 32)
 	if err != nil || count64 == 0 {
-		fmt.Fprintln(os.Stderr, "count must be a positive integer")
-		os.Exit(2)
+		return fmt.Errorf("count must be a positive integer")
 	}
 	count := uint32(count64)
 
 	data, err := os.ReadFile(inPath)
 	if err != nil {
-		fail(err)
+		return err
 	}
 
 	if *cutAtNonRef {
 		data, err = cutAfterLastNonReference(data)
 		if err != nil {
-			fail(err)
+			return err
 		}
 	}
 
 	out, err := encode.AppendPSkipFrames(data, count)
 	if err != nil {
-		fail(err)
+		return err
 	}
 
 	if *verify {
-		if err := verifyAppended(data, out, count); err != nil {
-			fail(err)
+		if err := verifyAppended(stdout, data, out, count); err != nil {
+			return err
 		}
 	}
 
 	// The slice count lets the caller assert the decoded frame count without having to know how
 	// much of the input survived a cut.
 	if slices, _, err := parseSlices(out); err == nil {
-		fmt.Printf("extended_slices=%d\n", len(slices))
+		fmt.Fprintf(stdout, "extended_slices=%d\n", len(slices))
 	}
 
 	if err := os.WriteFile(outPath, out, 0o644); err != nil {
-		fail(err)
+		return err
 	}
-	fmt.Printf("wrote %s (%d source bytes + %d P_Skip frames = %d bytes)\n",
+	fmt.Fprintf(stdout, "wrote %s (%d source bytes + %d P_Skip frames = %d bytes)\n",
 		outPath, len(data), count, len(out))
-}
-
-func fail(err error) {
-	fmt.Fprintln(os.Stderr, err)
-	os.Exit(1)
+	return nil
 }
 
 // parseSlices returns one entry per coded slice in an Annex-B stream, in decode order.
@@ -184,7 +191,7 @@ func cutAfterLastNonReference(annexB []byte) ([]byte, error) {
 //     reference picture of the source, not its last coded slice.
 //   - the picture order count must exceed every count already in the source, or an appended frame
 //     lands before the source's final picture in output order, or duplicates one outright.
-func verifyAppended(source, extended []byte, count uint32) error {
+func verifyAppended(stdout io.Writer, source, extended []byte, count uint32) error {
 	srcSlices, sps, err := parseSlices(source)
 	if err != nil {
 		return fmt.Errorf("verify: source: %w", err)
@@ -231,7 +238,7 @@ func verifyAppended(source, extended []byte, count uint32) error {
 		wantFrameNum = (wantFrameNum + 1) % maxFrameNum
 		wantPoc = (wantPoc + 2) % maxPOCLsb
 	}
-	fmt.Printf("verified %d appended frames: frame_num continues %d, "+
+	fmt.Fprintf(stdout, "verified %d appended frames: frame_num continues %d, "+
 		"pic_order_cnt_lsb continues %d\n", count, lastRefFrameNum, maxPoc)
 	return nil
 }

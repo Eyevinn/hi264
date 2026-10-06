@@ -120,7 +120,9 @@ func (e *PSkipExtender) Generated() uint64 { return e.generated }
 
 // ObserveNALU tracks one NAL unit, given without a start code or length prefix. Parameter sets are
 // remembered so that later slices parse; coded slices update the numbering. Anything else is
-// ignored, so a whole access unit can be passed through NAL unit by NAL unit.
+// ignored, so a whole access unit can be passed through NAL unit by NAL unit. A NAL unit that does
+// not parse, such as a truncated slice, returns an error and leaves the numbering unchanged, so the
+// caller can drop a damaged access unit and keep observing.
 func (e *PSkipExtender) ObserveNALU(nalu []byte) error {
 	if len(nalu) == 0 {
 		return nil
