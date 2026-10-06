@@ -96,25 +96,6 @@ func extendSegment(initPath, inSegPath, outSegPath string, count uint32, blackID
 		return fmt.Errorf("input segment has no fragments (no moof+mdat)")
 	}
 
-	// Reassemble the input as Annex-B so encode.LastFrameState can read POC.
-	// avc.ConvertSampleToByteStream mutates its input in-place, so feed it a
-	// copy — otherwise it overwrites the 4-byte NALU length prefixes inside
-	// the parsed mdat buffer, corrupting samples we later copy back out.
-	var annexB bytes.Buffer
-	annexB.Write(annexBParameterSets(initParsed.Init))
-	for _, seg := range segParsed.Segments {
-		for _, frag := range seg.Fragments {
-			samples, err := frag.GetFullSamples(nil)
-			if err != nil {
-				return fmt.Errorf("read input samples: %w", err)
-			}
-			for _, s := range samples {
-				dataCopy := append([]byte(nil), s.Data...)
-				annexB.Write(avc.ConvertSampleToByteStream(dataCopy))
-			}
-		}
-	}
-
 	sampleDur := lastSampleDuration(segParsed)
 	if sampleDur == 0 {
 		return fmt.Errorf("could not determine sample duration from input segment")
@@ -124,8 +105,11 @@ func extendSegment(initPath, inSegPath, outSegPath string, count uint32, blackID
 	if err != nil {
 		return fmt.Errorf("prepare extension: %w", err)
 	}
-	if err := ext.ObserveAnnexB(annexB.Bytes()); err != nil {
-		return fmt.Errorf("inspect input tail: %w", err)
+	// Every parameter set in the init segment, so that slices referencing any of them parse.
+	for _, nalu := range parameterSets(initParsed.Init) {
+		if err := ext.ObserveNALU(nalu); err != nil {
+			return fmt.Errorf("inspect init segment: %w", err)
+		}
 	}
 
 	width := int(sps.Width)
@@ -136,6 +120,11 @@ func extendSegment(initPath, inSegPath, outSegPath string, count uint32, blackID
 			samples, err := frag.GetFullSamples(nil)
 			if err != nil {
 				return fmt.Errorf("read input samples: %w", err)
+			}
+			for _, s := range samples {
+				if err := ext.ObserveAVCCSample(s.Data); err != nil {
+					return fmt.Errorf("inspect input sample: %w", err)
+				}
 			}
 			inputSamples = append(inputSamples, samples...)
 		}
@@ -299,10 +288,10 @@ func extractSPSPPS(init *mp4.InitSegment) (*avc.SPS, *avc.PPS, error) {
 	return nil, nil, fmt.Errorf("no AVC video track found")
 }
 
-// annexBParameterSets writes SPS and PPS NALUs from the init segment into
-// an Annex-B bytestream so encode.LastFrameState can resolve slice headers.
-func annexBParameterSets(init *mp4.InitSegment) []byte {
-	var out bytes.Buffer
+// parameterSets returns the SPS and PPS NALUs of every AVC sample entry in the init segment, the
+// SPSs first, since a PPS refers to one.
+func parameterSets(init *mp4.InitSegment) [][]byte {
+	var sps, pps [][]byte
 	for _, trak := range init.Moov.Traks {
 		stsd := trak.Mdia.Minf.Stbl.Stsd
 		for _, child := range stsd.Children {
@@ -310,17 +299,11 @@ func annexBParameterSets(init *mp4.InitSegment) []byte {
 			if !ok || e.AvcC == nil {
 				continue
 			}
-			for _, n := range e.AvcC.SPSnalus {
-				out.Write([]byte{0, 0, 0, 1})
-				out.Write(n)
-			}
-			for _, n := range e.AvcC.PPSnalus {
-				out.Write([]byte{0, 0, 0, 1})
-				out.Write(n)
-			}
+			sps = append(sps, e.AvcC.SPSnalus...)
+			pps = append(pps, e.AvcC.PPSnalus...)
 		}
 	}
-	return out.Bytes()
+	return append(sps, pps...)
 }
 
 func lastSampleDuration(file *mp4.File) uint32 {
