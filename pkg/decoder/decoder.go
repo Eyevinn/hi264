@@ -17,7 +17,8 @@ import (
 )
 
 // maxFrameSizeInMbs is the largest frame size in macroblocks defined by any
-// H.264 level (5.2). It bounds allocations sized from untrusted SPS dimensions.
+// H.264 level (MaxFS of levels 6-6.2, Table A-1). It bounds allocations sized
+// from untrusted SPS dimensions.
 const maxFrameSizeInMbs = 139264
 
 // Decoder is the H.264/AVC decoder.
@@ -446,7 +447,7 @@ func (d *Decoder) decodeIDR(nalu []byte) (*frame.Frame, error) {
 
 	// The picture dimensions come from the SPS (untrusted input); reject a
 	// frame whose macroblock count exceeds the largest defined H.264 level
-	// (5.2, MaxFrameSizeInMbs = 139264) before it is used to size per-macroblock
+	// (6.2, MaxFS = 139264) before it is used to size per-macroblock
 	// allocations, otherwise a crafted SPS can request a huge allocation.
 	if mbWidth <= 0 || mbHeight <= 0 || mbWidth*mbHeight > maxFrameSizeInMbs {
 		return nil, fmt.Errorf("frame size %dx%d mbs exceeds maximum %d",
