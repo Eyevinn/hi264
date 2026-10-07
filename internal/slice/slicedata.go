@@ -136,7 +136,11 @@ func decodeMacroblock(sc *SliceContext, mbIdx int) error {
 
 	// Decode mb_qp_delta if there are any coded coefficients
 	if mb.CBPLuma > 0 || mb.CBPChroma > 0 || (mb.MBType >= 1 && mb.MBType <= 24) {
-		mb.QPDelta = DecodeQPDelta(sc)
+		qpDelta, err := DecodeQPDelta(sc)
+		if err != nil {
+			return err
+		}
+		mb.QPDelta = qpDelta
 		// Equation 7-37: QPY = ((QPY_PREV + mb_qp_delta + 52 + 2*QpBdOffsetY) % (52 + QpBdOffsetY)) - QpBdOffsetY
 		qpBdOffsetY := 6 * (sc.BitDepthY - 8)
 		qpRange := 52 + qpBdOffsetY
