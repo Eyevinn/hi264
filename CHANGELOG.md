@@ -47,6 +47,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Requires mp4ff v0.58.0, whose SPS/PPS/slice-header parsing rejects out-of-range
   values, so such streams fail with a parse error instead of hanging or crashing.
+- `-version` reports the version Go embeds from the git tag and commit, also for `go install` and a
+  plain `go build`; `internal/version.go` and the Makefile `-ldflags` are gone
 
 ### Fixed
 - `hi264dec`: no panic on an empty NAL unit (adjacent start codes), and the NALU

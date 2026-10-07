@@ -347,7 +347,7 @@ func run(args []string) error {
 	}
 
 	if opts.version {
-		fmt.Printf("%s %s\n", appName, internal.GetVersion())
+		fmt.Printf("%s %s\n", appName, internal.Version())
 		return nil
 	}
 
