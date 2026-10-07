@@ -1,17 +1,20 @@
 .PHONY: all build test coverage check pre-commit pre-commit-install codespell clean install
 
-LDFLAGS = -X github.com/Eyevinn/hi264/internal.commitVersion=$$(git describe --tags HEAD 2>/dev/null || echo dev-$$(git rev-parse --short HEAD)) \
-          -X github.com/Eyevinn/hi264/internal.commitDate=$$(git log -1 --format=%ct)
+CMDS = hi264dec hi264gen
+BINARIES = $(addprefix out/,$(CMDS))
 
 all: check build test
 
-build: out/hi264dec out/hi264gen
+build: $(BINARIES)
 
-out/hi264dec: $(shell find pkg cmd/hi264dec internal -name '*.go')
-	go build -ldflags "$(LDFLAGS)" -o $@ ./cmd/hi264dec
-
-out/hi264gen: $(shell find pkg cmd/hi264gen internal -name '*.go')
-	go build -ldflags "$(LDFLAGS)" -o $@ ./cmd/hi264gen
+# Binaries are built as packages, not as main.go files, so that they carry the
+# version Go embeds from the git tag and commit (see internal/buildinfo.go).
+# They are .PHONY because that version is not a file prerequisite: a binary
+# built before a commit or a tag would be kept, still naming the old one. The
+# build cache makes the rebuild cheap.
+.PHONY: $(BINARIES)
+$(BINARIES): out/%:
+	go build -o $@ ./cmd/$*
 
 test:
 	go test ./...
@@ -42,5 +45,4 @@ clean:
 	rm -rf out/ coverage.out coverage.html coverage.txt venv/
 
 install:
-	go install -ldflags "$(LDFLAGS)" ./cmd/hi264dec
-	go install -ldflags "$(LDFLAGS)" ./cmd/hi264gen
+	go install $(addprefix ./cmd/,$(CMDS))
