@@ -1,5 +1,7 @@
 package slice
 
+import "fmt"
+
 // DecodeMBTypeIntra decodes mb_type for I-slices using CABAC (Table 9-34).
 // ctxIdxOffset = 3 for I-slices.
 // Returns the mb_type value (0=I_NxN, 1-24=I_16x16_x_y_z, 25=I_PCM).
@@ -248,7 +250,13 @@ func deriveCBPChromaCtx(sc *SliceContext, mbIdx int, secondBin bool) int {
 }
 
 // DecodeQPDelta decodes mb_qp_delta using CABAC (ctx 60-63).
-func DecodeQPDelta(sc *SliceContext) int {
+//
+// mb_qp_delta is limited to -(26 + QpBdOffsetY/2)..+(25 + QpBdOffsetY/2)
+// (section 7.4.5), so its unary code is at most 52 + QpBdOffsetY bins long.
+// A longer run can only come from a corrupt or truncated slice: once the
+// bitstream is exhausted the arithmetic decoder keeps returning the MPS, so
+// an unbounded loop would never terminate.
+func DecodeQPDelta(sc *SliceContext) (int, error) {
 	ctx := sc.Ctx
 	d := sc.Cabac
 
@@ -260,7 +268,12 @@ func DecodeQPDelta(sc *SliceContext) int {
 
 	bin0 := d.DecodeDecision(&ctx[ctxIdx])
 	if bin0 == 0 {
-		return 0
+		return 0, nil
+	}
+
+	maxVal := 52
+	if sc.BitDepthY > 8 {
+		maxVal += 6 * (sc.BitDepthY - 8)
 	}
 
 	// Subsequent bins: unary, ctx 62 then 63
@@ -275,14 +288,17 @@ func DecodeQPDelta(sc *SliceContext) int {
 			break
 		}
 		val++
+		if val > maxVal {
+			return 0, fmt.Errorf("mb_qp_delta: unary code longer than %d bins", maxVal)
+		}
 	}
 
 	// Map unary code to signed value:
 	// unary 1 -> +1, 2 -> -1, 3 -> +2, 4 -> -2, etc.
 	if val%2 == 1 {
-		return (val + 1) / 2
+		return (val + 1) / 2, nil
 	}
-	return -(val / 2)
+	return -(val / 2), nil
 }
 
 // zScanToBlockX maps z-scan 4x4 block index to 4x4 block column (0-3).
