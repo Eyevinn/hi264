@@ -45,7 +45,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   when the source SPS signals `pic_struct_present_flag` (non-HRD streams).
 
 ### Changed
-- Requires mp4ff v0.58.0, whose SPS/PPS/slice-header parsing rejects out-of-range
+- Requires mp4ff v0.59.0, whose SPS/PPS/slice-header parsing rejects out-of-range
   values, so such streams fail with a parse error instead of hanging or crashing.
 - `-version` reports the version Go embeds from the git tag and commit, also for `go install` and a
   plain `go build`; `internal/version.go` and the Makefile `-ldflags` are gone
