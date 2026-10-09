@@ -1,6 +1,14 @@
 package cabac
 
-import "fmt"
+import (
+	"errors"
+	"fmt"
+)
+
+// ErrEndOfData reports that decoding needed bits past the end of the slice data. A conforming slice
+// never does: decoding end_of_slice_flag equal to 1 ends exactly at the rbsp_stop_one_bit
+// (section 9.3.3.2.4), so this means the slice is truncated or corrupt.
+var ErrEndOfData = errors.New("cabac: read past the end of the slice data")
 
 // CtxState represents a CABAC context model with probability state and MPS value.
 type CtxState struct {
@@ -13,8 +21,9 @@ type Decoder struct {
 	codIRange  uint16
 	codIOffset uint16
 	data       []byte
-	pos        int // current byte position in data
-	bitsLeft   int // bits left in current byte
+	pos        int  // current byte position in data
+	bitsLeft   int  // bits left in current byte
+	pastEnd    bool // a bit was needed past the end of data
 }
 
 // NewDecoder creates a new CABAC decoder initialized with the given byte stream.
@@ -43,6 +52,7 @@ func (d *Decoder) readBit() uint16 {
 			d.bitsLeft = 8
 			d.pos++
 		} else {
+			d.pastEnd = true
 			return 0
 		}
 	}
@@ -111,6 +121,15 @@ func (d *Decoder) DecodeTerminate() uint8 {
 	}
 	d.renormalize()
 	return 0
+}
+
+// Err returns ErrEndOfData once decoding has needed bits past the end of the data. Those bits read
+// as 0, so the decoded values are meaningless from then on; callers check Err after each macroblock.
+func (d *Decoder) Err() error {
+	if d.pastEnd {
+		return ErrEndOfData
+	}
+	return nil
 }
 
 // BitsRead returns the number of bits consumed from the bitstream so far.

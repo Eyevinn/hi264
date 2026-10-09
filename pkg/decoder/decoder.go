@@ -414,6 +414,9 @@ func (d *Decoder) decodePSkip(nalu []byte) (*frame.Frame, error) {
 			}
 			isLast := mbIdx == totalMBs-1
 			term := dec.DecodeTerminate()
+			if err := dec.Err(); err != nil {
+				return nil, fmt.Errorf("CABAC P_Skip: MB %d: %w", mbIdx, err)
+			}
 			if isLast && term != 1 {
 				return nil, fmt.Errorf("CABAC P_Skip: expected end_of_slice at last MB %d", mbIdx)
 			}
