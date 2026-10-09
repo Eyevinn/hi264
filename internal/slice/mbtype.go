@@ -251,11 +251,10 @@ func deriveCBPChromaCtx(sc *SliceContext, mbIdx int, secondBin bool) int {
 
 // DecodeQPDelta decodes mb_qp_delta using CABAC (ctx 60-63).
 //
-// mb_qp_delta is limited to -(26 + QpBdOffsetY/2)..+(25 + QpBdOffsetY/2)
-// (section 7.4.5), so its unary code is at most 52 + QpBdOffsetY bins long.
-// A longer run can only come from a corrupt or truncated slice: once the
-// bitstream is exhausted the arithmetic decoder keeps returning the MPS, so
-// an unbounded loop would never terminate.
+// Its unary code is at most qpDeltaMaxUnary bins long (section 7.4.5). A longer
+// run can only come from a corrupt or truncated slice: once the bitstream is
+// exhausted the arithmetic decoder keeps returning the MPS, so an unbounded loop
+// would never terminate.
 func DecodeQPDelta(sc *SliceContext) (int, error) {
 	ctx := sc.Ctx
 	d := sc.Cabac
@@ -271,10 +270,7 @@ func DecodeQPDelta(sc *SliceContext) (int, error) {
 		return 0, nil
 	}
 
-	maxVal := 52
-	if sc.BitDepthY > 8 {
-		maxVal += 6 * (sc.BitDepthY - 8)
-	}
+	maxVal := qpDeltaMaxUnary(sc.BitDepthY)
 
 	// Subsequent bins: unary, ctx 62 then 63
 	val := 1

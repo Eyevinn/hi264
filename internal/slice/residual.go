@@ -1,6 +1,8 @@
 package slice
 
 import (
+	"fmt"
+
 	"github.com/Eyevinn/hi264/internal/cabac"
 )
 
@@ -54,7 +56,7 @@ var coeffAbsLevelTransition = [2][8]int{
 // ctxBlockCat identifies the type of block (DC, AC, 4x4, 8x8, etc.).
 // blkIdx is the block index within the MB for coded_block_flag context derivation.
 // Returns the decoded coefficient levels in scan order.
-func DecodeResidual(sc *SliceContext, mbIdx int, ctxBlockCat int, blkIdx int, maxCoeff int) []int32 {
+func DecodeResidual(sc *SliceContext, mbIdx int, ctxBlockCat int, blkIdx int, maxCoeff int) ([]int32, error) {
 	// Use pre-allocated buffer on SliceContext; clear only the portion we need
 	coeffs := sc.coeffBuf[:maxCoeff]
 	for i := range coeffs {
@@ -68,7 +70,7 @@ func DecodeResidual(sc *SliceContext, mbIdx int, ctxBlockCat int, blkIdx int, ma
 		cbf := sc.Cabac.DecodeDecision(&sc.Ctx[ctxIdx])
 		sc.MBs[mbIdx].CodedBlockFlag[ctxBlockCat][blkIdx] = cbf
 		if cbf == 0 {
-			return coeffs
+			return coeffs, nil
 		}
 	}
 
@@ -150,7 +152,14 @@ func DecodeResidual(sc *SliceContext, mbIdx int, ctxBlockCat int, blkIdx int, ma
 			}
 
 			if coeffAbs >= 15 {
-				suffix := decodeExpGolombBypass(sc.Cabac)
+				bitDepth := sc.BitDepthY
+				if ctxBlockCat == CtxBlockCatChromaDC || ctxBlockCat == CtxBlockCatChromaAC {
+					bitDepth = sc.BitDepthC
+				}
+				suffix, err := decodeExpGolombBypass(sc.Cabac, coeffAbsLevelMaxPrefix(bitDepth))
+				if err != nil {
+					return nil, err
+				}
 				coeffAbs += int32(suffix)
 			}
 
@@ -163,11 +172,12 @@ func DecodeResidual(sc *SliceContext, mbIdx int, ctxBlockCat int, blkIdx int, ma
 		}
 	}
 
-	return coeffs
+	return coeffs, nil
 }
 
-// decodeExpGolombBypass decodes a 0th-order Exp-Golomb code using bypass bins.
-func decodeExpGolombBypass(d *cabac.Decoder) uint32 {
+// decodeExpGolombBypass decodes a 0th-order Exp-Golomb code using bypass bins. A prefix longer than
+// maxPrefix bins can only come from a corrupt slice and returns an error.
+func decodeExpGolombBypass(d *cabac.Decoder, maxPrefix uint) (uint32, error) {
 	k := uint(0)
 	for {
 		bin := d.DecodeBypass()
@@ -175,13 +185,16 @@ func decodeExpGolombBypass(d *cabac.Decoder) uint32 {
 			break
 		}
 		k++
+		if k > maxPrefix {
+			return 0, fmt.Errorf("coeff_abs_level_minus1: Exp-Golomb prefix longer than %d bins", maxPrefix)
+		}
 	}
 	// Read k bits for the suffix
 	var val uint32
 	if k > 0 {
 		val = d.ReadBypassU(int(k))
 	}
-	return (1 << k) - 1 + val
+	return (1 << k) - 1 + val, nil
 }
 
 // deriveCodedBlockFlagCtx derives the context index increment for coded_block_flag.

@@ -148,8 +148,8 @@ func decodeMacroblock(sc *SliceContext, mbIdx int) error {
 		}
 		mb.QPDelta = qpDelta
 		// Equation 7-37: QPY = ((QPY_PREV + mb_qp_delta + 52 + 2*QpBdOffsetY) % (52 + QpBdOffsetY)) - QpBdOffsetY
-		qpBdOffsetY := 6 * (sc.BitDepthY - 8)
-		qpRange := 52 + qpBdOffsetY
+		qpBdOffsetY := qpBdOffset(sc.BitDepthY)
+		qpRange := numQPBase + qpBdOffsetY
 		mb.QPY = ((sc.QPY + mb.QPDelta + qpRange + 2*qpBdOffsetY) % qpRange) - qpBdOffsetY
 		sc.PrevMBQPDeltaNonZero = mb.QPDelta != 0
 		sc.QPY = mb.QPY
@@ -159,7 +159,9 @@ func decodeMacroblock(sc *SliceContext, mbIdx int) error {
 	}
 
 	// Decode residual
-	decodeResidualMB(sc, mbIdx)
+	if err := decodeResidualMB(sc, mbIdx); err != nil {
+		return err
+	}
 
 	// MBCMP trace (matches FFmpeg format — emitted AFTER residual, like FFmpeg)
 	if sc.TraceMBCMP {
@@ -181,14 +183,17 @@ func decodeMacroblock(sc *SliceContext, mbIdx int) error {
 }
 
 // decodeResidualMB decodes all residual data for a macroblock.
-func decodeResidualMB(sc *SliceContext, mbIdx int) {
+func decodeResidualMB(sc *SliceContext, mbIdx int) error {
 	mb := &sc.MBs[mbIdx]
 
 	if mb.MBType >= 1 && mb.MBType <= 24 {
 		// I_16x16: decode DC level, then AC levels for each 4x4 block
 
 		// Intra16x16 DC level (16 coefficients)
-		dcCoeffs := DecodeResidual(sc, mbIdx, CtxBlockCatIntra16x16DC, 0, 16)
+		dcCoeffs, err := DecodeResidual(sc, mbIdx, CtxBlockCatIntra16x16DC, 0, 16)
+		if err != nil {
+			return err
+		}
 		for i := range 16 {
 			mb.Intra16x16DCLevel[i] = dcCoeffs[i]
 		}
@@ -199,7 +204,10 @@ func decodeResidualMB(sc *SliceContext, mbIdx int) {
 				// Check if the 8x8 block containing this 4x4 block has coded coeffs
 				i8x8 := i / 4
 				if mb.CBPLuma&(1<<uint(i8x8)) != 0 {
-					acCoeffs := DecodeResidual(sc, mbIdx, CtxBlockCatIntra16x16AC, i, 15)
+					acCoeffs, err := DecodeResidual(sc, mbIdx, CtxBlockCatIntra16x16AC, i, 15)
+					if err != nil {
+						return err
+					}
 					for j := range 15 {
 						mb.Intra16x16ACLevel[i][j] = acCoeffs[j]
 					}
@@ -211,7 +219,10 @@ func decodeResidualMB(sc *SliceContext, mbIdx int) {
 			// I_8x8: decode 8x8 luma blocks
 			for i := range 4 {
 				if mb.CBPLuma&(1<<uint(i)) != 0 {
-					coeffs := DecodeResidual(sc, mbIdx, CtxBlockCatLuma8x8, i, 64)
+					coeffs, err := DecodeResidual(sc, mbIdx, CtxBlockCatLuma8x8, i, 64)
+					if err != nil {
+						return err
+					}
 					for j := range 64 {
 						mb.LumaLevel8x8[i][j] = coeffs[j]
 					}
@@ -227,7 +238,10 @@ func decodeResidualMB(sc *SliceContext, mbIdx int) {
 			for i := range 16 {
 				i8x8 := i / 4
 				if mb.CBPLuma&(1<<uint(i8x8)) != 0 {
-					coeffs := DecodeResidual(sc, mbIdx, CtxBlockCatLuma4x4, i, 16)
+					coeffs, err := DecodeResidual(sc, mbIdx, CtxBlockCatLuma4x4, i, 16)
+					if err != nil {
+						return err
+					}
 					for j := range 16 {
 						mb.LumaLevel4x4[i][j] = coeffs[j]
 					}
@@ -242,7 +256,10 @@ func decodeResidualMB(sc *SliceContext, mbIdx int) {
 		for iCbCr := range 2 {
 			if mb.CBPChroma > 0 {
 				numDC := 4 // for 4:2:0
-				dcCoeffs := DecodeResidual(sc, mbIdx, CtxBlockCatChromaDC, iCbCr, numDC)
+				dcCoeffs, err := DecodeResidual(sc, mbIdx, CtxBlockCatChromaDC, iCbCr, numDC)
+				if err != nil {
+					return err
+				}
 				for j := range numDC {
 					mb.ChromaDCLevel[iCbCr][j] = dcCoeffs[j]
 				}
@@ -254,7 +271,10 @@ func decodeResidualMB(sc *SliceContext, mbIdx int) {
 			for iCbCr := range 2 {
 				for i := range 4 { // 4 blocks per component for 4:2:0
 					blkIdx := iCbCr*4 + i
-					acCoeffs := DecodeResidual(sc, mbIdx, CtxBlockCatChromaAC, blkIdx, 15)
+					acCoeffs, err := DecodeResidual(sc, mbIdx, CtxBlockCatChromaAC, blkIdx, 15)
+					if err != nil {
+						return err
+					}
 					for j := range 15 {
 						mb.ChromaACLevel[iCbCr][i][j] = acCoeffs[j]
 					}
@@ -262,6 +282,7 @@ func decodeResidualMB(sc *SliceContext, mbIdx int) {
 			}
 		}
 	}
+	return nil
 }
 
 // decodeIPCM handles I_PCM macroblock type.
@@ -415,8 +436,8 @@ func decodeMacroblockCAVLC(sc *SliceContext, mbIdx int) error {
 			return err
 		}
 		mb.QPDelta = qpDelta
-		qpBdOffsetY := 6 * (sc.BitDepthY - 8)
-		qpRange := 52 + qpBdOffsetY
+		qpBdOffsetY := qpBdOffset(sc.BitDepthY)
+		qpRange := numQPBase + qpBdOffsetY
 		mb.QPY = ((sc.QPY + mb.QPDelta + qpRange + 2*qpBdOffsetY) % qpRange) - qpBdOffsetY
 		sc.QPY = mb.QPY
 	} else {
