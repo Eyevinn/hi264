@@ -32,7 +32,7 @@ func TestDecodeRejectsOutOfRangeDeblockingOffset(t *testing.T) {
 					t.Fatalf("panic on decode: %v", r)
 				}
 			}()
-			nalus := deblockOffsetStream(t, c.alpha, c.beta)
+			nalus := oneMBStream(t, c.alpha, c.beta, 0)
 			_, err := New().DecodeNALUs(nalus)
 			switch {
 			case !c.wantErr && err != nil:
@@ -46,9 +46,9 @@ func TestDecodeRejectsOutOfRangeDeblockingOffset(t *testing.T) {
 	}
 }
 
-// deblockOffsetStream returns the SPS, PPS and a one-macroblock CAVLC IDR
-// slice, at QP 26 and with the given deblocking offsets.
-func deblockOffsetStream(t *testing.T, alphaDiv2, betaDiv2 int32) [][]byte {
+// oneMBStream returns the SPS, PPS and a one-macroblock CAVLC IDR slice at
+// QP 26, with the given deblocking offsets and mb_qp_delta.
+func oneMBStream(t *testing.T, alphaDiv2, betaDiv2, mbQPDelta int32) [][]byte {
 	t.Helper()
 	params := encode.EncodeParams{Width: 16, Height: 16, QP: 26}
 	spsAnnexB, err := encode.GenerateSPS(params)
@@ -82,11 +82,11 @@ func deblockOffsetStream(t *testing.T, alphaDiv2, betaDiv2 int32) [][]byte {
 	w.WriteSE(alphaDiv2)
 	w.WriteSE(betaDiv2)
 	// One I_16x16 macroblock with DC prediction and no residual.
-	w.WriteUE(3)  // mb_type: I_16x16_2_0_0
-	w.WriteUE(0)  // intra_chroma_pred_mode: DC
-	w.WriteSE(0)  // mb_qp_delta
-	w.WriteBit(1) // Intra16x16DCLevel coeff_token: no coefficients
-	w.WriteBit(1) // rbsp_stop_one_bit
+	w.WriteUE(3)         // mb_type: I_16x16_2_0_0
+	w.WriteUE(0)         // intra_chroma_pred_mode: DC
+	w.WriteSE(mbQPDelta) // mb_qp_delta
+	w.WriteBit(1)        // Intra16x16DCLevel coeff_token: no coefficients
+	w.WriteBit(1)        // rbsp_stop_one_bit
 	idrNALU := encode.BuildNALU(byte(avc.NALU_IDR), 3, w.Bytes())
 
 	return [][]byte{spsNALU, ppsNALU, idrNALU}

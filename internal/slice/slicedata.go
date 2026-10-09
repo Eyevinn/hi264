@@ -60,6 +60,23 @@ func (sc *SliceContext) beginMB(mbIdx, sliceNum int) error {
 	return nil
 }
 
+// applyQPDelta sets the QPY of macroblock mb from mb_qp_delta (equation 7-37).
+// It rejects an mb_qp_delta outside qpDeltaRange: the slice header keeps QPY in
+// -QpBdOffsetY..51, and only an in-range mb_qp_delta keeps the wrap of
+// equation 7-37 there, as Go's % takes the sign of a negative dividend.
+func (sc *SliceContext) applyQPDelta(mb *MBData, qpDelta int) error {
+	lo, hi := qpDeltaRange(sc.BitDepthY)
+	if qpDelta < lo || qpDelta > hi {
+		return fmt.Errorf("mb_qp_delta %d outside %d..%d", qpDelta, lo, hi)
+	}
+	mb.QPDelta = qpDelta
+	qpBdOffsetY := qpBdOffset(sc.BitDepthY)
+	qpRange := numQPBase + qpBdOffsetY
+	mb.QPY = ((sc.QPY + qpDelta + qpRange + 2*qpBdOffsetY) % qpRange) - qpBdOffsetY
+	sc.QPY = mb.QPY
+	return nil
+}
+
 // DecodeSliceData decodes the macroblocks of one CABAC I-slice into sc.
 // sliceData is the raw slice data bytes (after slice header, EBSP-decoded).
 func (sc *SliceContext) DecodeSliceData(sliceData []byte, p SliceParams) error {
@@ -175,13 +192,10 @@ func decodeMacroblock(sc *SliceContext, mbIdx int) error {
 		if err != nil {
 			return err
 		}
-		mb.QPDelta = qpDelta
-		// Equation 7-37: QPY = ((QPY_PREV + mb_qp_delta + 52 + 2*QpBdOffsetY) % (52 + QpBdOffsetY)) - QpBdOffsetY
-		qpBdOffsetY := qpBdOffset(sc.BitDepthY)
-		qpRange := numQPBase + qpBdOffsetY
-		mb.QPY = ((sc.QPY + mb.QPDelta + qpRange + 2*qpBdOffsetY) % qpRange) - qpBdOffsetY
+		if err := sc.applyQPDelta(mb, qpDelta); err != nil {
+			return err
+		}
 		sc.PrevMBQPDeltaNonZero = mb.QPDelta != 0
-		sc.QPY = mb.QPY
 	} else {
 		sc.PrevMBQPDeltaNonZero = false
 		mb.QPY = sc.QPY // propagate QP from previous MB
@@ -447,11 +461,9 @@ func decodeMacroblockCAVLC(sc *SliceContext, mbIdx int) error {
 		if err != nil {
 			return err
 		}
-		mb.QPDelta = qpDelta
-		qpBdOffsetY := qpBdOffset(sc.BitDepthY)
-		qpRange := numQPBase + qpBdOffsetY
-		mb.QPY = ((sc.QPY + mb.QPDelta + qpRange + 2*qpBdOffsetY) % qpRange) - qpBdOffsetY
-		sc.QPY = mb.QPY
+		if err := sc.applyQPDelta(mb, qpDelta); err != nil {
+			return err
+		}
 	} else {
 		mb.QPY = sc.QPY
 	}
