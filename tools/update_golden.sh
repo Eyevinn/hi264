@@ -49,7 +49,8 @@ echo "var goldenTests = map[string]string{"
 for f in "$TMPDIR"/*.264; do
     name=$(basename "$f" .264)
     ref="$TMPDIR/${name}_ref.yuv"
-    go_yuv="$TMPDIR/${name}_go.yuv"
+    # hi264dec appends _WxH_yuv420p to the .yuv name it is given
+    go_yuv=$(ls "$TMPDIR/${name}"_go_*_yuv420p.yuv 2>/dev/null | head -n 1 || true)
     # Only include tests that passed (ref == go)
     if cmp -s "$ref" "$go_yuv" 2>/dev/null; then
         cp "$f" "$GOLDEN/$name.264"
