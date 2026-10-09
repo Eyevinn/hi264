@@ -58,12 +58,13 @@ This is **not** a general-purpose video encoder — it does not accept
 arbitrary pixel input or perform motion estimation. The encoder produces
 I\_16x16 DC prediction frames from grid patterns (one color per 16×16 or
 8×8 block), with AC residual encoding for sub-block boundaries. The
-decoder handles IDR plus P\_Skip frames; full P/B-frame decoding is out
-of scope. All processing is 8-bit 4:2:0 only.
+decoder handles IDR frames, also when split into several slices, plus
+P\_Skip frames; full P/B-frame decoding is out of scope. All processing is
+8-bit 4:2:0 only.
 
-Pixel-perfect match with FFmpeg IDR decoding across 41+ golden test cases
+Pixel-perfect match with FFmpeg IDR decoding across 50 golden test cases
 covering varied content, profiles, QP ranges, scaling matrices,
-deblocking, resolutions, and both entropy coding modes.
+deblocking, resolutions, multi-slice pictures, and both entropy coding modes.
 
 ## Build & Test
 

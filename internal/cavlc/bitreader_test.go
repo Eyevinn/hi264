@@ -137,3 +137,29 @@ func TestAlignToByte(t *testing.T) {
 		t.Errorf("BitsRead() = %d, want 8 after second align", br.BitsRead())
 	}
 }
+
+func TestMoreRBSPData(t *testing.T) {
+	// 0xB4 = 1011 0100: data bits 1011 0, rbsp_stop_one_bit, then two zero
+	// alignment bits; trailing zero bytes are not RBSP data either.
+	cases := []struct {
+		desc     string
+		data     []byte
+		skipBits int
+		want     bool
+	}{
+		{"before data", []byte{0xB4}, 0, true},
+		{"before last data bit", []byte{0xB4}, 4, true},
+		{"at stop bit", []byte{0xB4}, 5, false},
+		{"at stop bit, trailing zero bytes", []byte{0xB4, 0x00, 0x00}, 5, false},
+		{"stop bit is byte's last bit", []byte{0xA5, 0x01}, 15, false},
+		{"stop bit in next byte", []byte{0xA5, 0x01}, 8, true},
+		{"no stop bit", []byte{0x00}, 0, false},
+	}
+	for _, c := range cases {
+		br := NewBitReader(c.data)
+		br.SkipBits(c.skipBits)
+		if got := br.MoreRBSPData(); got != c.want {
+			t.Errorf("%s: MoreRBSPData() = %v, want %v", c.desc, got, c.want)
+		}
+	}
+}

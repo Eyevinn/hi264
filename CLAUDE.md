@@ -2,14 +2,15 @@
 
 ## Project Status
 
-Pure Go H.264/AVC decoder for IDR and P_Skip frames with CABAC and CAVLC entropy
-coding, plus a bitstream generator that produces valid H.264 test content from
-grid patterns (I_16x16 DC prediction). Supports 16x16 macroblock and 8x8 block
+Pure Go H.264/AVC decoder for IDR (single- or multi-slice) and P_Skip frames
+with CABAC and CAVLC entropy coding, plus a bitstream generator that produces
+valid H.264 test content from grid patterns (I_16x16 DC prediction). Supports
+16x16 macroblock and 8x8 block
 granularity via PlaneGrid (direct Y/Cb/Cr planes, no character indirection).
 Not a general-purpose encoder. Supports both CAVLC (Baseline) and CABAC (Main
 profile), with P_Skip frame generation for efficient multi-frame sequences.
 All processing is 8-bit 4:2:0 only (no 10-bit or 4:2:2/4:4:4 support).
-Pixel-perfect match with FFmpeg across 41 golden decoder test cases and 12+
+Pixel-perfect match with FFmpeg across 50 golden decoder test cases and 12+
 encoder verification tests.
 
 See README.md for CLI usage, architecture, dependencies, and library examples.

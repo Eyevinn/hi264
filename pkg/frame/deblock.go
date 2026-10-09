@@ -111,10 +111,10 @@ func absInt(x int) int {
 }
 
 // Deblock applies the H.264 deblocking filter to the frame.
-// filterOffsetA and filterOffsetB are SliceAlphaC0OffsetDiv2*2 and SliceBetaOffsetDiv2*2.
-func Deblock(f *Frame, sc *slice.SliceContext, filterOffsetA, filterOffsetB int) {
-	a := 52 + filterOffsetA
-	b := 52 + filterOffsetB
+// Each macroblock's edges are filtered with the disable_deblocking_filter_idc
+// and filter offsets of the slice that contains it (clause 8.7). Its left and
+// top edges are filtered across slice boundaries unless that idc is 2.
+func Deblock(f *Frame, sc *slice.SliceContext) {
 	chromaQpOff := sc.ChromaQpIndexOffset
 
 	for mbIdx := 0; mbIdx < sc.TotalMBs; mbIdx++ {
@@ -122,11 +122,22 @@ func Deblock(f *Frame, sc *slice.SliceContext, filterOffsetA, filterOffsetB int)
 		mbY := mbIdx / sc.MBWidth
 		mb := &sc.MBs[mbIdx]
 
+		sp := &sc.Slices[mb.SliceNum-1]
+		if sp.DisableDeblockingFilterIdc == 1 {
+			continue
+		}
+		a := 52 + sp.FilterOffsetA
+		b := 52 + sp.FilterOffsetB
+
 		qp := mb.QPY
 		is8x8 := mb.TransformSize8x8
 
 		hasLeft := mbX > 0
 		hasTop := mbY > 0
+		if sp.DisableDeblockingFilterIdc == 2 {
+			hasLeft = sc.MBAvailA(mbIdx) != nil
+			hasTop = sc.MBAvailB(mbIdx) != nil
+		}
 
 		x0 := mbX * 16
 		y0 := mbY * 16

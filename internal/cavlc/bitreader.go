@@ -2,7 +2,10 @@
 // entropy decoding for H.264/AVC.
 package cavlc
 
-import "fmt"
+import (
+	"fmt"
+	"math/bits"
+)
 
 // BitReader reads individual bits from a byte slice.
 type BitReader struct {
@@ -19,6 +22,21 @@ func NewBitReader(data []byte) *BitReader {
 // BitsRead returns the total number of bits read so far.
 func (r *BitReader) BitsRead() int {
 	return r.bytePos*8 + int(r.bitPos)
+}
+
+// MoreRBSPData reports whether data remains before the RBSP trailing bits
+// (more_rbsp_data(), clause 7.2): whether the next bit to read comes before
+// the rbsp_stop_one_bit, which is the last bit equal to 1 in the data.
+func (r *BitReader) MoreRBSPData() bool {
+	last := len(r.data) - 1
+	for last >= 0 && r.data[last] == 0 {
+		last--
+	}
+	if last < 0 {
+		return false
+	}
+	stopBit := last*8 + 7 - bits.TrailingZeros8(r.data[last])
+	return r.BitsRead() < stopBit
 }
 
 // ReadBit reads a single bit.
