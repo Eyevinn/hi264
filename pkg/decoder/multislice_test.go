@@ -125,7 +125,7 @@ func TestDecodeNALUsWithoutIDR(t *testing.T) {
 // Slices are decoded as runs of macroblocks in raster order, so a PPS with
 // slice groups (FMO) is rejected rather than decoded wrongly.
 func TestDecodeRejectsSliceGroups(t *testing.T) {
-	nalus := deblockOffsetStream(t, 0, 0)
+	nalus := oneMBStream(t, 0, 0, 0)
 	w := encode.NewBitWriter()
 	w.WriteUE(0)      // pic_parameter_set_id
 	w.WriteUE(0)      // seq_parameter_set_id

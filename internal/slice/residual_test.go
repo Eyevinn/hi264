@@ -67,15 +67,20 @@ func TestLimitsFollowBitDepth(t *testing.T) {
 	cases := []struct {
 		bitDepth          int
 		qpBdOffset        int
+		qpDeltaLo         int
+		qpDeltaHi         int
 		qpDeltaMaxUnary   int
 		levelMaxPrefixLen uint
 	}{
-		{8, 0, 52, 16},
-		{10, 12, 64, 18},
+		{8, 0, -26, 25, 52, 16},
+		{10, 12, -32, 31, 64, 18},
 	}
 	for _, c := range cases {
 		if got := qpBdOffset(c.bitDepth); got != c.qpBdOffset {
 			t.Errorf("qpBdOffset(%d) = %d, want %d", c.bitDepth, got, c.qpBdOffset)
+		}
+		if lo, hi := qpDeltaRange(c.bitDepth); lo != c.qpDeltaLo || hi != c.qpDeltaHi {
+			t.Errorf("qpDeltaRange(%d) = %d..%d, want %d..%d", c.bitDepth, lo, hi, c.qpDeltaLo, c.qpDeltaHi)
 		}
 		if got := qpDeltaMaxUnary(c.bitDepth); got != c.qpDeltaMaxUnary {
 			t.Errorf("qpDeltaMaxUnary(%d) = %d, want %d", c.bitDepth, got, c.qpDeltaMaxUnary)

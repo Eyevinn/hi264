@@ -24,11 +24,18 @@ func qpBdOffset(bitDepth int) int {
 	return qpBdOffsetPerBit * (bitDepth - baseBitDepth)
 }
 
-// qpDeltaMaxUnary returns the longest unary code of a conforming mb_qp_delta. mb_qp_delta is in
-// -(26 + QpBdOffsetY/2)..+(25 + QpBdOffsetY/2) (section 7.4.5), and the unary value maps 1 to +1,
-// 2 to -1, and so on, so the most negative value takes numQPBase + QpBdOffsetY bins.
+// qpDeltaRange returns the range of a conforming mb_qp_delta:
+// -(26 + QpBdOffsetY/2)..+(25 + QpBdOffsetY/2) (section 7.4.5).
+func qpDeltaRange(bitDepthY int) (lo, hi int) {
+	half := qpBdOffset(bitDepthY) / 2
+	return -(numQPBase/2 + half), numQPBase/2 - 1 + half
+}
+
+// qpDeltaMaxUnary returns the longest unary code of a conforming mb_qp_delta. The unary value maps
+// 1 to +1, 2 to -1, and so on, so the most negative value of qpDeltaRange, -n, takes 2n bins.
 func qpDeltaMaxUnary(bitDepthY int) int {
-	return numQPBase + qpBdOffset(bitDepthY)
+	lo, _ := qpDeltaRange(bitDepthY)
+	return -2 * lo
 }
 
 // coeffAbsLevelMaxPrefix returns the longest Exp-Golomb prefix in the suffix of a conforming
