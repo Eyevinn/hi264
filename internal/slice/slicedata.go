@@ -53,10 +53,16 @@ func DecodeSliceData(sliceData []byte, sliceQPY int, mbWidth, mbHeight int,
 		if err != nil {
 			return sc, fmt.Errorf("mb %d: %w", mbIdx, err)
 		}
+		if err := dec.Err(); err != nil {
+			return sc, fmt.Errorf("mb %d: %w", mbIdx, err)
+		}
 
 		// Check end_of_slice_flag
 		if mbIdx < totalMBs-1 {
 			endOfSlice := dec.DecodeTerminate()
+			if err := dec.Err(); err != nil {
+				return sc, fmt.Errorf("mb %d: %w", mbIdx, err)
+			}
 			if endOfSlice == 1 {
 				break
 			}
