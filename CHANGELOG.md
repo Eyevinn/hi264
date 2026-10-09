@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-10-09
+
 ### Added
 
 #### Streaming extension (`encode.PSkipExtender`)
@@ -56,7 +58,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Requires mp4ff v0.59.0, whose SPS/PPS/slice-header parsing rejects out-of-range
   values, so such streams fail with a parse error instead of hanging or crashing.
 - `-version` reports the version Go embeds from the git tag and commit, also for `go install` and a
-  plain `go build`; `internal/version.go` and the Makefile `-ldflags` are gone
+  plain `go build`; `internal/version.go` and the Makefile `-ldflags` are gone.
 
 ### Fixed
 - Decoder (`DecodeNALUs`, `DecodeAllFrames`, `hi264dec`): IDR pictures carried by
@@ -76,7 +78,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   in `mb_qp_delta` or returning a frame decoded from bits past the end of the slice.
 - Decoder: an out-of-range `mb_qp_delta` is an error; under CAVLC it could
   panic (#35).
-- CAVLC `trailing_ones_sign_flag` order: the encoder emitted the sign flags for the trailing ones in reverse. `levels` is collected in reverse scan order, which is already the transmission order (spec 7.3.5.3.2), so the flags must be written front to back. Blocks with two or three trailing ones of mixed sign decoded with those coefficients' signs permuted. For chroma DC this transposes the 2x2 DC array (the TR/BL sub-blocks pick up equal and opposite errors), and since chroma is coded DC-only the error could not be corrected and fed the next macroblock's intra chroma prediction — showing up as colour bleeding streaking down and to the right on PNG/JPEG input. Flat `.gridimg` patterns were unaffected because a single DC coefficient never produces a mixed-sign trailing-one pair.
+- Encoder (CAVLC, `hi264gen`): `trailing_ones_sign_flag` was written in reverse, so
+  mixed-sign trailing ones decoded with permuted signs, seen as colour bleeding on
+  PNG/JPEG input.
 
 ### Documentation
 - `pic_order_cnt_type` 2 and `weighted_pred_flag=1` were described as
@@ -254,7 +258,8 @@ Typical use cases include:
 - 41+ golden decoder test cases with pixel-perfect FFmpeg match
 - 12+ encoder verification tests against FFmpeg decode
 
-[Unreleased]: https://github.com/Eyevinn/hi264/compare/v0.10.0...HEAD
+[Unreleased]: https://github.com/Eyevinn/hi264/compare/v0.11.0...HEAD
+[0.11.0]: https://github.com/Eyevinn/hi264/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/Eyevinn/hi264/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/Eyevinn/hi264/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/Eyevinn/hi264/releases/tag/v0.8.0
