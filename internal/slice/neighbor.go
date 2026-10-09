@@ -39,6 +39,7 @@ func I16x16CBPChroma(mbType int) int {
 
 // MBData stores decoded information for a single macroblock.
 type MBData struct {
+	SliceNum            int // 1-based number of the slice containing the MB; 0 until a slice decodes it
 	MBType              int
 	TransformSize8x8    bool
 	IntraPredMode16x16  int     // for I_16x16
@@ -66,15 +67,33 @@ type MBData struct {
 	TotalCoeff    [24]int // combined luma+chroma tracking
 }
 
-// SliceContext holds the per-slice state needed during decoding.
+// SliceParams holds the slice header values that decoding a slice and
+// deblocking its macroblocks depend on.
+type SliceParams struct {
+	FirstMB  int // first_mb_in_slice
+	SliceQPY int // 26 + pic_init_qp_minus26 + slice_qp_delta
+
+	DisableDeblockingFilterIdc int
+	FilterOffsetA              int // slice_alpha_c0_offset_div2 * 2
+	FilterOffsetB              int // slice_beta_offset_div2 * 2
+}
+
+// SliceContext holds the decoding state of one picture: the macroblock data
+// shared by all its slices, and the entropy decoding state of the slice
+// being decoded.
 type SliceContext struct {
 	Cabac    *cabac.Decoder
 	Ctx      *[1024]cabac.CtxState
 	MBWidth  int
 	MBHeight int
 	TotalMBs int
-	QPY      int // current slice QP
+	QPY      int // QP of the previous MB in the current slice (QPY,PRED)
 	MBs      []MBData
+
+	// Slices holds the parameters of the decoded slices; MBData.SliceNum-1
+	// indexes it.
+	Slices     []SliceParams
+	decodedMBs int // macroblocks assigned to a slice so far
 
 	// CAVLC support
 	IsCAVLC bool
@@ -99,13 +118,17 @@ type SliceContext struct {
 	sigIndices [64]int
 }
 
+// The MBAvail functions return a neighbour of macroblock mbIdx, or nil if it
+// is not available (clauses 6.4.8 and 6.4.9). A neighbour is not available
+// when it lies outside the picture or in a different slice: each slice is
+// decoded as if the other slices of the picture did not exist.
+
 // MBAvailA returns the left neighbor MB data, or nil if not available.
 func (sc *SliceContext) MBAvailA(mbIdx int) *MBData {
-	mbX := mbIdx % sc.MBWidth
-	if mbX == 0 {
+	if mbIdx%sc.MBWidth == 0 {
 		return nil
 	}
-	return &sc.MBs[mbIdx-1]
+	return sc.sameSlice(mbIdx, mbIdx-1)
 }
 
 // MBAvailB returns the top neighbor MB data, or nil if not available.
@@ -113,5 +136,31 @@ func (sc *SliceContext) MBAvailB(mbIdx int) *MBData {
 	if mbIdx < sc.MBWidth {
 		return nil
 	}
-	return &sc.MBs[mbIdx-sc.MBWidth]
+	return sc.sameSlice(mbIdx, mbIdx-sc.MBWidth)
+}
+
+// MBAvailC returns the top-right neighbor MB data, or nil if not available.
+func (sc *SliceContext) MBAvailC(mbIdx int) *MBData {
+	if mbIdx < sc.MBWidth || (mbIdx+1)%sc.MBWidth == 0 {
+		return nil
+	}
+	return sc.sameSlice(mbIdx, mbIdx-sc.MBWidth+1)
+}
+
+// MBAvailD returns the top-left neighbor MB data, or nil if not available.
+func (sc *SliceContext) MBAvailD(mbIdx int) *MBData {
+	if mbIdx < sc.MBWidth || mbIdx%sc.MBWidth == 0 {
+		return nil
+	}
+	return sc.sameSlice(mbIdx, mbIdx-sc.MBWidth-1)
+}
+
+// sameSlice returns macroblock nIdx if it is in the same slice as macroblock
+// mbIdx, and nil otherwise.
+func (sc *SliceContext) sameSlice(mbIdx, nIdx int) *MBData {
+	n := &sc.MBs[nIdx]
+	if n.SliceNum != sc.MBs[mbIdx].SliceNum {
+		return nil
+	}
+	return n
 }

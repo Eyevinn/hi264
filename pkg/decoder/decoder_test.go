@@ -55,6 +55,16 @@ var goldenTests = map[string]string{
 	"cavlc_qp10":     "a90eb388182e100acc685692c27e4359a8406fdf73e3bcb2198517fb80809f25",
 	"cavlc_qp40":     "fd52639a04bcd156521fe1fb4415ececf299b826b064b7efa283bdbea0a012b9",
 	"cavlc_tiny":     "e8540d96643d61ffa28bbd7409933f937e4c9d5b5a1ab51b0bfc5db72123a8a9",
+	// Multi-slice golden tests
+	"slices_4":                   "7fd5041c16866a9c34507565d3af6bfa090465b583754410057f3d511045026b",
+	"slices_bytes":               "aff10df7a24d4bbd4cac88ce1fd52bd5fc5453a092605b70f02075346e7f29aa",
+	"slices_mb1":                 "dec2b9a7cc484db3128e21d2a874690cbaf9937225cb5df4d066fc82a4a7f084",
+	"slices_midrow":              "bc6f68d9da3d379301894cfc15f5f30c2230f076cbadd4cc62ad9906793ee30c",
+	"slices_mixed_deblock":       "087d0b7cdd4b36529a932d8221defe5b37aa575ac5ea541bd91e0006cfffc49f",
+	"cavlc_slices_4":             "e7291ac6dabd4ad801900e153a90effeaf9a73410315445edab38f4afbf1c3a3",
+	"cavlc_slices_baseline":      "737ed4ab3741b83e82e9365263bf35fc9e3bd8b9cc4ae6ed7d93bff2ce2cb874",
+	"cavlc_slices_midrow":        "010f19c938b40ea95bce1f3275782e545e558df35b2e80f1cc59a8d199841437",
+	"cavlc_slices_mixed_deblock": "1cd2c43db7e450fdd8aae0aadf83b42552a5b80a489cb2c03ed6f63010f844fe",
 }
 
 func TestGoldenDecode(t *testing.T) {

@@ -8,32 +8,18 @@ import (
 	"github.com/Eyevinn/hi264/internal/context"
 )
 
-// DecodeSliceData decodes all macroblocks in an I-slice.
-// sliceData is the raw slice data bytes (after slice header, EBSP-decoded).
-// Returns the slice context with all decoded MB data.
-func DecodeSliceData(sliceData []byte, sliceQPY int, mbWidth, mbHeight int,
-	transform8x8ModeFlag bool, chromaArrayType int,
-	bitDepthY, bitDepthC int, chromaQpIndexOffset int, traceMBCMP bool) (*SliceContext, error) {
-
+// NewSliceContext returns the context for decoding the slices of one picture
+// of mbWidth x mbHeight macroblocks. Each slice is decoded into it with
+// DecodeSliceData or DecodeSliceDataCAVLC.
+func NewSliceContext(mbWidth, mbHeight int, isCAVLC, transform8x8ModeFlag bool, chromaArrayType int,
+	bitDepthY, bitDepthC int, chromaQpIndexOffset int, traceMBCMP bool) *SliceContext {
 	totalMBs := mbWidth * mbHeight
-
-	// Initialize context models for I-slice
-	models := context.InitModels(sliceQPY, 2, 0) // sliceType=2 for I
-
-	// Initialize CABAC decoder
-	dec, err := cabac.NewDecoder(sliceData)
-	if err != nil {
-		return nil, fmt.Errorf("cabac init: %w", err)
-	}
-
-	sc := &SliceContext{
-		Cabac:                dec,
-		Ctx:                  (*[1024]cabac.CtxState)(&models),
+	return &SliceContext{
 		MBWidth:              mbWidth,
 		MBHeight:             mbHeight,
 		TotalMBs:             totalMBs,
-		QPY:                  sliceQPY,
 		MBs:                  make([]MBData, totalMBs),
+		IsCAVLC:              isCAVLC,
 		Transform8x8ModeFlag: transform8x8ModeFlag,
 		ChromaArrayType:      chromaArrayType,
 		BitDepthY:            bitDepthY,
@@ -41,35 +27,78 @@ func DecodeSliceData(sliceData []byte, sliceQPY int, mbWidth, mbHeight int,
 		ChromaQpIndexOffset:  chromaQpIndexOffset,
 		TraceMBCMP:           traceMBCMP,
 	}
+}
 
-	// Initialize all MB QP to slice QP
-	for i := range sc.MBs {
-		sc.MBs[i].QPY = sliceQPY
+// DecodedMBs returns the number of macroblocks that the slices have decoded.
+func (sc *SliceContext) DecodedMBs() int {
+	return sc.decodedMBs
+}
+
+// beginSlice records the slice p and resets the per-slice decoding state.
+// It returns the slice's number.
+func (sc *SliceContext) beginSlice(p SliceParams) (int, error) {
+	if p.FirstMB < 0 || p.FirstMB >= sc.TotalMBs {
+		return 0, fmt.Errorf("first_mb_in_slice %d outside a picture of %d macroblocks", p.FirstMB, sc.TotalMBs)
+	}
+	sc.Slices = append(sc.Slices, p)
+	sc.QPY = p.SliceQPY
+	sc.PrevMBQPDeltaNonZero = false
+	return len(sc.Slices), nil
+}
+
+// beginMB assigns macroblock mbIdx to slice sliceNum.
+func (sc *SliceContext) beginMB(mbIdx, sliceNum int) error {
+	if mbIdx >= sc.TotalMBs {
+		return fmt.Errorf("slice continues past the last macroblock %d", sc.TotalMBs-1)
+	}
+	mb := &sc.MBs[mbIdx]
+	if mb.SliceNum != 0 {
+		return fmt.Errorf("mb %d: already decoded by slice %d", mbIdx, mb.SliceNum)
+	}
+	mb.SliceNum = sliceNum
+	sc.decodedMBs++
+	return nil
+}
+
+// DecodeSliceData decodes the macroblocks of one CABAC I-slice into sc.
+// sliceData is the raw slice data bytes (after slice header, EBSP-decoded).
+func (sc *SliceContext) DecodeSliceData(sliceData []byte, p SliceParams) error {
+	sliceNum, err := sc.beginSlice(p)
+	if err != nil {
+		return err
 	}
 
-	// Decode each macroblock
-	for mbIdx := range totalMBs {
-		err := decodeMacroblock(sc, mbIdx)
-		if err != nil {
-			return sc, fmt.Errorf("mb %d: %w", mbIdx, err)
+	// Initialize context models for I-slice
+	models := context.InitModels(p.SliceQPY, 2, 0) // sliceType=2 for I
+
+	// Initialize CABAC decoder
+	dec, err := cabac.NewDecoder(sliceData)
+	if err != nil {
+		return fmt.Errorf("cabac init: %w", err)
+	}
+	sc.Cabac = dec
+	sc.Ctx = (*[1024]cabac.CtxState)(&models)
+
+	// Decode macroblocks until end_of_slice_flag
+	for mbIdx := p.FirstMB; ; mbIdx++ {
+		if err := sc.beginMB(mbIdx, sliceNum); err != nil {
+			return err
+		}
+		if err := decodeMacroblock(sc, mbIdx); err != nil {
+			return fmt.Errorf("mb %d: %w", mbIdx, err)
 		}
 		if err := dec.Err(); err != nil {
-			return sc, fmt.Errorf("mb %d: %w", mbIdx, err)
+			return fmt.Errorf("mb %d: %w", mbIdx, err)
 		}
 
-		// Check end_of_slice_flag
-		if mbIdx < totalMBs-1 {
-			endOfSlice := dec.DecodeTerminate()
-			if err := dec.Err(); err != nil {
-				return sc, fmt.Errorf("mb %d: %w", mbIdx, err)
-			}
-			if endOfSlice == 1 {
-				break
-			}
+		endOfSlice := dec.DecodeTerminate()
+		if err := dec.Err(); err != nil {
+			return fmt.Errorf("mb %d: %w", mbIdx, err)
+		}
+		if endOfSlice == 1 {
+			return nil
 		}
 	}
-
-	return sc, nil
 }
 
 // decodeMacroblock decodes a single macroblock.
@@ -293,44 +322,27 @@ func decodeIPCM(sc *SliceContext, mbIdx int) error {
 	return nil
 }
 
-// DecodeSliceDataCAVLC decodes all macroblocks in an I-slice using CAVLC entropy coding.
+// DecodeSliceDataCAVLC decodes the macroblocks of one CAVLC I-slice into sc.
 // br is positioned at the start of slice data (after header skip).
-func DecodeSliceDataCAVLC(br *cavlc.BitReader, sliceQPY int, mbWidth, mbHeight int,
-	transform8x8ModeFlag bool, chromaArrayType int,
-	bitDepthY, bitDepthC int, chromaQpIndexOffset int, traceMBCMP bool) (*SliceContext, error) {
-
-	totalMBs := mbWidth * mbHeight
-
-	sc := &SliceContext{
-		IsCAVLC:              true,
-		Br:                   br,
-		MBWidth:              mbWidth,
-		MBHeight:             mbHeight,
-		TotalMBs:             totalMBs,
-		QPY:                  sliceQPY,
-		MBs:                  make([]MBData, totalMBs),
-		Transform8x8ModeFlag: transform8x8ModeFlag,
-		ChromaArrayType:      chromaArrayType,
-		BitDepthY:            bitDepthY,
-		BitDepthC:            bitDepthC,
-		ChromaQpIndexOffset:  chromaQpIndexOffset,
-		TraceMBCMP:           traceMBCMP,
+func (sc *SliceContext) DecodeSliceDataCAVLC(br *cavlc.BitReader, p SliceParams) error {
+	sliceNum, err := sc.beginSlice(p)
+	if err != nil {
+		return err
 	}
+	sc.Br = br
 
-	// Initialize all MB QP to slice QP
-	for i := range sc.MBs {
-		sc.MBs[i].QPY = sliceQPY
-	}
-
-	// Decode each macroblock (CAVLC has no end_of_slice_flag)
-	for mbIdx := range totalMBs {
-		err := decodeMacroblockCAVLC(sc, mbIdx)
-		if err != nil {
-			return sc, fmt.Errorf("mb %d: %w", mbIdx, err)
+	// Decode macroblocks until the RBSP trailing bits (CAVLC has no end_of_slice_flag)
+	for mbIdx := p.FirstMB; ; mbIdx++ {
+		if err := sc.beginMB(mbIdx, sliceNum); err != nil {
+			return err
+		}
+		if err := decodeMacroblockCAVLC(sc, mbIdx); err != nil {
+			return fmt.Errorf("mb %d: %w", mbIdx, err)
+		}
+		if !br.MoreRBSPData() {
+			return nil
 		}
 	}
-
-	return sc, nil
 }
 
 // decodeMacroblockCAVLC decodes a single macroblock using CAVLC.

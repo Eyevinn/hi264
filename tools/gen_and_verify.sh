@@ -29,6 +29,7 @@ set -euo pipefail
 FFMPEG=/opt/homebrew/bin/ffmpeg
 H264DEC=./hi264dec
 OUTDIR=/tmp/hi264_tests
+MIX_SLICE_DEBLOCK="${OUTDIR}/mix_slice_deblock"
 FILTER="${1:-}"
 
 PASS=0
@@ -38,31 +39,29 @@ ERRORS=()
 
 mkdir -p "$OUTDIR"
 
-# Build decoder
+# Build decoder and slice header rewriter
 echo "=== Building hi264dec ==="
 go build -o "$H264DEC" ./cmd/hi264dec
+go build -o "$MIX_SLICE_DEBLOCK" ./tools/mix_slice_deblock
 echo ""
 
-run_test() {
-    local name=$1 width=$2 height=$3 source=$4 profile=$5
-    shift 5
-    local x264extra="$*"
-
-    # If filter is set, skip non-matching tests
+# skip_test returns success, and counts the test as skipped, if the filter
+# excludes it.
+skip_test() {
+    local name=$1
     if [[ -n "$FILTER" ]] && ! echo "$name" | grep -qE "$FILTER"; then
         SKIP=$((SKIP + 1))
-        return
+        return 0
     fi
+    return 1
+}
 
-    local base="${OUTDIR}/${name}"
-    local h264="${base}.264"
-    local ref_yuv="${base}_ref.yuv"
-    # hi264dec appends _WxH_yuv420p to the .yuv name it is given
-    local go_yuv="${base}_go_${width}x${height}_yuv420p.yuv"
+# encode_test encodes 1 IDR frame with ffmpeg + libx264 into an Annex-B file.
+encode_test() {
+    local name=$1 width=$2 height=$3 source=$4 profile=$5 h264=$6
+    shift 6
+    local x264extra="$*"
 
-    printf "%-50s " "$name"
-
-    # 1. Encode: 1 IDR frame, annex-B
     local base_opts="keyint=1:min-keyint=1:bframes=0:no-scenecut:cabac=1"
     local opts="$base_opts"
     if [[ -n "$x264extra" ]]; then
@@ -82,15 +81,25 @@ run_test() {
         -f lavfi -i "$lavfi" \
         -t 1 -pix_fmt yuv420p -frames:v 1 \
         -c:v libx264 -profile:v "$profile" \
-        -x264opts "$opts" \
-        "$h264" 2>"${base}_encode.log"; then
+        -x264opts "$opts" -f h264 \
+        "$h264" 2>"${OUTDIR}/${name}_encode.log"; then
         echo "FAIL (encode error)"
         FAIL=$((FAIL + 1))
-        ERRORS+=("$name: ffmpeg encode failed — see ${base}_encode.log")
-        return
+        ERRORS+=("$name: ffmpeg encode failed — see ${OUTDIR}/${name}_encode.log")
+        return 1
     fi
+}
 
-    # 2. Decode with FFmpeg (reference)
+# verify_test decodes <name>.264 with FFmpeg and hi264 and compares the output.
+verify_test() {
+    local name=$1 width=$2 height=$3
+    local base="${OUTDIR}/${name}"
+    local h264="${base}.264"
+    local ref_yuv="${base}_ref.yuv"
+    # hi264dec appends _WxH_yuv420p to the .yuv name it is given
+    local go_yuv="${base}_go_${width}x${height}_yuv420p.yuv"
+
+    # Decode with FFmpeg (reference)
     if ! $FFMPEG -y -loglevel error \
         -i "$h264" -pix_fmt yuv420p \
         -f rawvideo "$ref_yuv" 2>"${base}_ffdec.log"; then
@@ -100,7 +109,7 @@ run_test() {
         return
     fi
 
-    # 3. Decode with hi264
+    # Decode with hi264
     if ! $H264DEC "$h264" "${base}_go.yuv" >"${base}_godec.log" 2>&1; then
         echo "FAIL (hi264 error)"
         FAIL=$((FAIL + 1))
@@ -108,7 +117,7 @@ run_test() {
         return
     fi
 
-    # 4. Compare byte-for-byte
+    # Compare byte-for-byte
     if cmp -s "$ref_yuv" "$go_yuv"; then
         echo "PASS"
         PASS=$((PASS + 1))
@@ -127,6 +136,37 @@ run_test() {
         FAIL=$((FAIL + 1))
         ERRORS+=("$name: YUV mismatch (ref=${ref_size} go=${go_size})")
     fi
+}
+
+# run_test encodes a test case with x264 and verifies it.
+run_test() {
+    local name=$1 width=$2 height=$3 source=$4 profile=$5
+    shift 5
+    skip_test "$name" && return
+
+    printf "%-50s " "$name"
+    encode_test "$name" "$width" "$height" "$source" "$profile" "${OUTDIR}/${name}.264" "$@" || return 0
+    verify_test "$name" "$width" "$height"
+}
+
+# run_mixed_deblock_test encodes a multi-slice test case with x264, gives its
+# slices different deblocking controls with tools/mix_slice_deblock (x264
+# uses the same for all), and verifies the result.
+run_mixed_deblock_test() {
+    local name=$1 width=$2 height=$3 source=$4 profile=$5
+    shift 5
+    skip_test "$name" && return
+
+    printf "%-50s " "$name"
+    local x264_out="${OUTDIR}/${name}.x264"
+    encode_test "$name" "$width" "$height" "$source" "$profile" "$x264_out" "$@" || return 0
+    if ! $MIX_SLICE_DEBLOCK "$x264_out" "${OUTDIR}/${name}.264" >"${OUTDIR}/${name}_mix.log" 2>&1; then
+        echo "FAIL (mix_slice_deblock error)"
+        FAIL=$((FAIL + 1))
+        ERRORS+=("$name: mix_slice_deblock failed — see ${OUTDIR}/${name}_mix.log")
+        return
+    fi
+    verify_test "$name" "$width" "$height"
 }
 
 echo "=== Running H.264 IDR decode verification tests ==="
@@ -244,6 +284,24 @@ run_test "cavlc_black"          320 240 "color=c=black" high     "cabac=0"
 run_test "cavlc_tiny"            64  64 "testsrc2"      high     "cabac=0"
 run_test "cavlc_hd"            1280 720 "testsrc2"      high     "cabac=0"
 run_test "cavlc_cqm"           320 240 "testsrc2"      high     "cabac=0:cqm=jvt"
+echo ""
+
+# ---------------------------------------------------------------------------
+# Group 13: Multi-slice pictures — slice starts at row starts and mid-row,
+# one macroblock per slice, and slices of a byte budget. The mixed tests give
+# each slice its own disable_deblocking_filter_idc (0, 1, 2), filter offsets
+# and, for CAVLC, slice QP.
+# ---------------------------------------------------------------------------
+echo "--- Group 13: Multi-slice ---"
+run_test "slices_4"              320 240 "testsrc2"   high     "slices=4"
+run_test "slices_midrow"         320 240 "testsrc2"   high     "slice-max-mbs=37"
+run_test "slices_mb1"            176 144 "testsrc2"   main     "slice-max-mbs=1"
+run_test "slices_bytes"          320 240 "mandelbrot" high     "slice-max-size=400"
+run_test "cavlc_slices_4"        320 240 "testsrc2"   high     "cabac=0:slices=4"
+run_test "cavlc_slices_midrow"   320 240 "testsrc2"   high     "cabac=0:slice-max-mbs=37"
+run_test "cavlc_slices_baseline" 320 240 "testsrc2"   baseline "cabac=0:slice-max-mbs=29"
+run_mixed_deblock_test "slices_mixed_deblock"       320 240 "testsrc2" high "slice-max-mbs=37"
+run_mixed_deblock_test "cavlc_slices_mixed_deblock" 320 240 "testsrc2" high "cabac=0:slice-max-mbs=37"
 echo ""
 
 # ---------------------------------------------------------------------------

@@ -183,35 +183,14 @@ func New() *Decoder {
 // DecodeNALUs decodes a complete access unit (set of NALUs) and returns the reconstructed frame.
 // For multi-frame streams, use DecodeAllFrames instead.
 func (d *Decoder) DecodeNALUs(nalus [][]byte) (*frame.Frame, error) {
-	for _, nalu := range nalus {
-		if len(nalu) == 0 {
-			continue
-		}
-		naluType := avc.NaluType(nalu[0] & 0x1f)
-
-		switch naluType {
-		case avc.NALU_SPS:
-			sps, err := avc.ParseSPSNALUnit(nalu, true)
-			if err != nil {
-				return nil, fmt.Errorf("parse SPS: %w", err)
-			}
-			d.spsMap[sps.ParameterID] = sps
-		case avc.NALU_PPS:
-			pps, err := avc.ParsePPSNALUnit(nalu, d.spsMap)
-			if err != nil {
-				return nil, fmt.Errorf("parse PPS: %w", err)
-			}
-			d.ppsMap[pps.PicParameterSetID] = pps
-		case avc.NALU_IDR:
-			f, err := d.decodeIDR(nalu)
-			if err != nil {
-				return nil, err
-			}
-			d.refFrame = f
-			return f, nil
-		}
+	frames, err := d.decodeFrames(nalus, false, 1)
+	if err != nil {
+		return nil, err
 	}
-	return nil, fmt.Errorf("no IDR NALU found")
+	if len(frames) == 0 {
+		return nil, fmt.Errorf("no IDR NALU found")
+	}
+	return frames[0], nil
 }
 
 // DecodeAllFrames decodes all frames from a set of NALUs (IDR and non-IDR).
@@ -219,19 +198,27 @@ func (d *Decoder) DecodeNALUs(nalus [][]byte) (*frame.Frame, error) {
 // returned if a non-IDR slice contains non-skip macroblocks.
 // Returns frames in decode order.
 func (d *Decoder) DecodeAllFrames(nalus [][]byte) ([]*frame.Frame, error) {
-	return d.decodeFrames(nalus, true)
+	return d.decodeFrames(nalus, true, 0)
 }
 
 // DecodeIDRFrames decodes only IDR frames from a set of NALUs, skipping
 // all non-IDR slices. Returns frames in decode order.
 func (d *Decoder) DecodeIDRFrames(nalus [][]byte) ([]*frame.Frame, error) {
-	return d.decodeFrames(nalus, false)
+	return d.decodeFrames(nalus, false, 0)
 }
 
-func (d *Decoder) decodeFrames(nalus [][]byte, includeNonIDR bool) ([]*frame.Frame, error) {
+// decodeFrames decodes the frames in nalus, stopping after maxFrames of them
+// when maxFrames > 0. An IDR picture may be carried by several slices; it is
+// reconstructed once its slices cover all its macroblocks, and it is an error
+// if nalus ends, or the next picture starts, before they do.
+func (d *Decoder) decodeFrames(nalus [][]byte, includeNonIDR bool, maxFrames int) ([]*frame.Frame, error) {
 	var frames []*frame.Frame
+	var pic *idrPicture // IDR picture whose slices are being decoded
 
 	for _, nalu := range nalus {
+		if maxFrames > 0 && len(frames) == maxFrames {
+			break
+		}
 		if len(nalu) == 0 {
 			continue
 		}
@@ -251,7 +238,30 @@ func (d *Decoder) decodeFrames(nalus [][]byte, includeNonIDR bool) ([]*frame.Fra
 			}
 			d.ppsMap[pps.PicParameterSetID] = pps
 		case avc.NALU_IDR:
-			f, err := d.decodeIDR(nalu)
+			sh, err := avc.ParseSliceHeader(nalu, d.spsMap, d.ppsMap)
+			if err != nil {
+				return frames, fmt.Errorf("IDR frame %d: parse slice header: %w", len(frames), err)
+			}
+			if sh.RedundantPicCnt > 0 {
+				continue // a redundant slice only replaces a lost primary slice
+			}
+			if pic != nil && startsNewPicture(pic.first, sh) {
+				return frames, fmt.Errorf("IDR frame %d: %w", len(frames), pic.incompleteError())
+			}
+			if pic == nil {
+				pic, err = d.newIDRPicture(sh)
+				if err != nil {
+					return frames, fmt.Errorf("IDR frame %d: %w", len(frames), err)
+				}
+			}
+			if err := pic.decodeSlice(nalu, sh); err != nil {
+				return frames, fmt.Errorf("IDR frame %d: %w", len(frames), err)
+			}
+			if pic.sc.DecodedMBs() < pic.sc.TotalMBs {
+				continue
+			}
+			f, err := pic.reconstruct(d.SkipDeblock)
+			pic = nil
 			if err != nil {
 				return frames, fmt.Errorf("IDR frame %d: %w", len(frames), err)
 			}
@@ -261,6 +271,9 @@ func (d *Decoder) decodeFrames(nalus [][]byte, includeNonIDR bool) ([]*frame.Fra
 			if !includeNonIDR {
 				continue
 			}
+			if pic != nil {
+				return frames, fmt.Errorf("IDR frame %d: %w", len(frames), pic.incompleteError())
+			}
 			f, err := d.decodePSkip(nalu)
 			if err != nil {
 				return frames, fmt.Errorf("p frame %d: %w", len(frames), err)
@@ -268,6 +281,9 @@ func (d *Decoder) decodeFrames(nalus [][]byte, includeNonIDR bool) ([]*frame.Fra
 			d.refFrame = f
 			frames = append(frames, f)
 		}
+	}
+	if pic != nil {
+		return frames, fmt.Errorf("IDR frame %d: %w", len(frames), pic.incompleteError())
 	}
 	return frames, nil
 }
@@ -431,22 +447,25 @@ func (d *Decoder) decodePSkip(nalu []byte) (*frame.Frame, error) {
 	return cloneFrame(d.refFrame), nil
 }
 
-// decodeIDR decodes an IDR frame.
-func (d *Decoder) decodeIDR(nalu []byte) (*frame.Frame, error) {
-	// Parse slice header
-	sh, err := avc.ParseSliceHeader(nalu, d.spsMap, d.ppsMap)
-	if err != nil {
-		return nil, fmt.Errorf("parse slice header: %w", err)
-	}
+// idrPicture is an IDR picture whose slices are being decoded. The
+// macroblocks of each slice are parsed as the slice arrives, with the SPS and
+// PPS of the picture's first slice; the picture is reconstructed once its
+// slices cover all its macroblocks.
+type idrPicture struct {
+	first *avc.SliceHeader // header of the picture's first slice
+	sps   *avc.SPS
+	pps   *avc.PPS
+	sc    *slice.SliceContext
+}
 
+// newIDRPicture starts the IDR picture whose first slice has header sh.
+func (d *Decoder) newIDRPicture(sh *avc.SliceHeader) (*idrPicture, error) {
 	pps := d.ppsMap[sh.PicParamID]
 	sps := d.spsMap[pps.SeqParameterSetID]
 
 	// Calculate dimensions
-	width := int(sps.Width)
-	height := int(sps.Height)
-	mbWidth := (width + 15) / 16
-	mbHeight := (height + 15) / 16
+	mbWidth := (int(sps.Width) + 15) / 16
+	mbHeight := (int(sps.Height) + 15) / 16
 
 	// The picture dimensions come from the SPS (untrusted input); reject a
 	// frame whose macroblock count exceeds the largest defined H.264 level
@@ -457,8 +476,12 @@ func (d *Decoder) decodeIDR(nalu []byte) (*frame.Frame, error) {
 			mbWidth, mbHeight, maxFrameSizeInMbs)
 	}
 
-	// Calculate slice QP
-	sliceQPY := 26 + int(pps.PicInitQpMinus26) + int(sh.SliceQPDelta)
+	// Slices are decoded as runs of macroblocks in raster order, which slice
+	// groups (FMO) do not follow.
+	if pps.NumSliceGroupsMinus1 > 0 {
+		return nil, fmt.Errorf("slice groups (num_slice_groups_minus1=%d) not supported",
+			pps.NumSliceGroupsMinus1)
+	}
 
 	// Determine chroma array type
 	chromaArrayType := 1 // 4:2:0 default
@@ -469,46 +492,82 @@ func (d *Decoder) decodeIDR(nalu []byte) (*frame.Frame, error) {
 	bitDepthY := 8 + int(sps.BitDepthLumaMinus8)
 	bitDepthC := 8 + int(sps.BitDepthChromaMinus8)
 
-	var sc *slice.SliceContext
+	sc := slice.NewSliceContext(mbWidth, mbHeight, !pps.EntropyCodingModeFlag,
+		pps.Transform8x8ModeFlag, chromaArrayType, bitDepthY, bitDepthC,
+		int(pps.ChromaQpIndexOffset), d.TraceMBCMP)
+	return &idrPicture{first: sh, sps: sps, pps: pps, sc: sc}, nil
+}
+
+// startsNewPicture reports whether the slice with header sh starts a new
+// picture rather than continuing the IDR picture whose first slice has header
+// first (clause 7.4.1.2.4). As in FFmpeg, a slice that starts at macroblock 0
+// always starts a new picture.
+func startsNewPicture(first, sh *avc.SliceHeader) bool {
+	return sh.FirstMBInSlice == 0 ||
+		sh.FrameNum != first.FrameNum ||
+		sh.PicParamID != first.PicParamID ||
+		sh.FieldPicFlag != first.FieldPicFlag ||
+		sh.BottomFieldFlag != first.BottomFieldFlag ||
+		sh.PicOrderCntLsb != first.PicOrderCntLsb ||
+		sh.DeltaPicOrderCntBottom != first.DeltaPicOrderCntBottom ||
+		sh.DeltaPicOrderCnt != first.DeltaPicOrderCnt ||
+		sh.IDRPicID != first.IDRPicID
+}
+
+// incompleteError reports the macroblocks that no slice of the picture covers.
+func (p *idrPicture) incompleteError() error {
+	return fmt.Errorf("picture incomplete: its slices cover %d of %d macroblocks",
+		p.sc.DecodedMBs(), p.sc.TotalMBs)
+}
+
+// decodeSlice parses the macroblocks of the slice nalu with header sh.
+func (p *idrPicture) decodeSlice(nalu []byte, sh *avc.SliceHeader) error {
+	sps, pps := p.sps, p.pps
+	params := slice.SliceParams{
+		FirstMB:                    int(sh.FirstMBInSlice),
+		SliceQPY:                   26 + int(pps.PicInitQpMinus26) + int(sh.SliceQPDelta),
+		DisableDeblockingFilterIdc: int(sh.DisableDeblockingFilterIDC),
+		FilterOffsetA:              int(sh.SliceAlphaC0OffsetDiv2) * 2,
+		FilterOffsetB:              int(sh.SliceBetaOffsetDiv2) * 2,
+	}
+
 	if pps.EntropyCodingModeFlag {
 		// CABAC path
 		sliceData := removeEBSPPrevention(nalu[sh.Size:])
-		var err2 error
-		sc, err2 = slice.DecodeSliceData(sliceData, sliceQPY, mbWidth, mbHeight,
-			pps.Transform8x8ModeFlag, chromaArrayType, bitDepthY, bitDepthC,
-			int(pps.ChromaQpIndexOffset), d.TraceMBCMP)
-		if err2 != nil {
-			return nil, fmt.Errorf("decode slice data (CABAC): %w", err2)
+		if err := p.sc.DecodeSliceData(sliceData, params); err != nil {
+			return fmt.Errorf("decode slice data (CABAC): %w", err)
 		}
-	} else {
-		// CAVLC path: operate on full EBSP-decoded NALU, skip header at bit level
-		fullData := removeEBSPPrevention(nalu)
-		br := cavlc.NewBitReader(fullData)
-
-		err = br.SkipSliceHeaderIDR(cavlc.SliceHeaderParams{
-			FrameMbsOnly:                          sps.FrameMbsOnlyFlag,
-			Log2MaxFrameNumMinus4:                 uint(sps.Log2MaxFrameNumMinus4),
-			PicOrderCntType:                       uint(sps.PicOrderCntType),
-			Log2MaxPicOrderCntLsbMinus4:           uint(sps.Log2MaxPicOrderCntLsbMinus4),
-			BottomFieldPicOrderInFramePresentFlag: pps.BottomFieldPicOrderInFramePresentFlag,
-			DeblockingFilterControlPresent:        pps.DeblockingFilterControlPresentFlag,
-			RedundantPicCntPresentFlag:            pps.RedundantPicCntPresentFlag,
-		})
-		if err != nil {
-			return nil, fmt.Errorf("skip slice header (CAVLC): %w", err)
-		}
-
-		var err2 error
-		sc, err2 = slice.DecodeSliceDataCAVLC(br, sliceQPY, mbWidth, mbHeight,
-			pps.Transform8x8ModeFlag, chromaArrayType, bitDepthY, bitDepthC,
-			int(pps.ChromaQpIndexOffset), d.TraceMBCMP)
-		if err2 != nil {
-			return nil, fmt.Errorf("decode slice data (CAVLC): %w", err2)
-		}
+		return nil
 	}
 
-	// Reconstruct frame
-	f := frame.NewFrame(width, height)
+	// CAVLC path: operate on full EBSP-decoded NALU, skip header at bit level
+	fullData := removeEBSPPrevention(nalu)
+	br := cavlc.NewBitReader(fullData)
+
+	err := br.SkipSliceHeaderIDR(cavlc.SliceHeaderParams{
+		FrameMbsOnly:                          sps.FrameMbsOnlyFlag,
+		Log2MaxFrameNumMinus4:                 uint(sps.Log2MaxFrameNumMinus4),
+		PicOrderCntType:                       uint(sps.PicOrderCntType),
+		Log2MaxPicOrderCntLsbMinus4:           uint(sps.Log2MaxPicOrderCntLsbMinus4),
+		BottomFieldPicOrderInFramePresentFlag: pps.BottomFieldPicOrderInFramePresentFlag,
+		DeblockingFilterControlPresent:        pps.DeblockingFilterControlPresentFlag,
+		RedundantPicCntPresentFlag:            pps.RedundantPicCntPresentFlag,
+	})
+	if err != nil {
+		return fmt.Errorf("skip slice header (CAVLC): %w", err)
+	}
+
+	if err := p.sc.DecodeSliceDataCAVLC(br, params); err != nil {
+		return fmt.Errorf("decode slice data (CAVLC): %w", err)
+	}
+	return nil
+}
+
+// reconstruct builds the frame from the picture's decoded macroblocks and
+// applies the deblocking filter unless skipDeblock is set.
+func (p *idrPicture) reconstruct(skipDeblock bool) (*frame.Frame, error) {
+	sps := p.sps
+	f := frame.NewFrame(int(sps.Width), int(sps.Height))
 
 	// Extract color space metadata from VUI if present
 	if sps.VUI != nil {
@@ -519,16 +578,14 @@ func (d *Decoder) decodeIDR(nalu []byte) (*frame.Frame, error) {
 		f.VideoFullRangeFlag = sps.VUI.VideoFullRangeFlag
 	}
 
-	err = reconstructFrame(sc, f, sps, pps)
+	err := reconstructFrame(p.sc, f, sps, p.pps)
 	if err != nil {
 		return nil, fmt.Errorf("reconstruct frame: %w", err)
 	}
 
 	// Apply deblocking filter
-	if sh.DisableDeblockingFilterIDC != 1 && !d.SkipDeblock {
-		frame.Deblock(f, sc,
-			int(sh.SliceAlphaC0OffsetDiv2)*2,
-			int(sh.SliceBetaOffsetDiv2)*2)
+	if !skipDeblock {
+		frame.Deblock(f, p.sc)
 	}
 
 	return f, nil
@@ -558,21 +615,22 @@ func reconstructFrame(sc *slice.SliceContext, f *frame.Frame, sps *avc.SPS, pps 
 		mbX := mbIdx % sc.MBWidth
 		mbY := mbIdx / sc.MBWidth
 		mb := &sc.MBs[mbIdx]
+		nb := mbNeighbors(sc, mbIdx)
 
 		if mb.MBType >= 1 && mb.MBType <= 24 {
 			// I_16x16
-			err := reconstructI16x16(sc, f, mbIdx, mbX, mbY, mb, &sm)
+			err := reconstructI16x16(sc, f, mbIdx, mbX, mbY, mb, nb, &sm)
 			if err != nil {
 				return fmt.Errorf("reconstruct I_16x16 mb %d: %w", mbIdx, err)
 			}
 		} else if mb.MBType == slice.MBTypeINxN {
 			if mb.TransformSize8x8 {
-				err := reconstructI8x8(sc, f, mbIdx, mbX, mbY, mb, &sm)
+				err := reconstructI8x8(sc, f, mbIdx, mbX, mbY, mb, nb, &sm)
 				if err != nil {
 					return fmt.Errorf("reconstruct I_8x8 mb %d: %w", mbIdx, err)
 				}
 			} else {
-				err := reconstructI4x4(sc, f, mbIdx, mbX, mbY, mb, &sm)
+				err := reconstructI4x4(sc, f, mbIdx, mbX, mbY, mb, nb, &sm)
 				if err != nil {
 					return fmt.Errorf("reconstruct I_4x4 mb %d: %w", mbIdx, err)
 				}
@@ -581,18 +639,70 @@ func reconstructFrame(sc *slice.SliceContext, f *frame.Frame, sps *avc.SPS, pps 
 
 		// Reconstruct chroma
 		if sc.ChromaArrayType != 0 {
-			reconstructChroma(sc, f, mbIdx, mbX, mbY, mb, &sm)
+			reconstructChroma(sc, f, mbIdx, mbX, mbY, mb, nb, &sm)
 		}
 	}
 
 	return nil
 }
 
+// availability records which neighbouring samples of a block are available
+// for intra prediction: left, top, top-left and top-right of the block. For a
+// macroblock, it records which of the neighbouring macroblocks A, B, D and C
+// are available.
+type availability struct {
+	left, top, topLeft, topRight bool
+}
+
+// mbNeighbors returns which neighbouring macroblocks of macroblock mbIdx are
+// available: inside the picture and in the same slice (clause 6.4.9).
+func mbNeighbors(sc *slice.SliceContext, mbIdx int) availability {
+	return availability{
+		left:     sc.MBAvailA(mbIdx) != nil,
+		top:      sc.MBAvailB(mbIdx) != nil,
+		topLeft:  sc.MBAvailD(mbIdx) != nil,
+		topRight: sc.MBAvailC(mbIdx) != nil,
+	}
+}
+
+// lumaBlockAvail returns which neighbouring samples of the size x size luma
+// block at (bx, by) in a macroblock are available, given the availability nb
+// of the macroblock's neighbours. Samples in a neighbouring macroblock take
+// its availability. Samples inside the macroblock are available, except
+// above-right samples in the macroblock to the right. For 4x4 blocks whose
+// above-right samples lie in a block decoded later, the caller marks them
+// not available (topRightNotAvail4x4).
+func lumaBlockAvail(bx, by, size int, nb availability) availability {
+	av := availability{
+		left:     bx > 0 || nb.left,
+		top:      by > 0 || nb.top,
+		topRight: bx+size < 16,
+	}
+	switch {
+	case bx > 0 && by > 0:
+		av.topLeft = true
+	case by > 0:
+		av.topLeft = nb.left
+	case bx > 0:
+		av.topLeft = nb.top
+	default:
+		av.topLeft = nb.topLeft
+	}
+	if by == 0 {
+		if bx+size < 16 {
+			av.topRight = nb.top
+		} else {
+			av.topRight = nb.topRight
+		}
+	}
+	return av
+}
+
 // reconstructI16x16 reconstructs an I_16x16 macroblock.
 func reconstructI16x16(sc *slice.SliceContext, f *frame.Frame,
-	mbIdx, mbX, mbY int, mb *slice.MBData, sm *ScalingMatrices) error {
+	mbIdx, mbX, mbY int, mb *slice.MBData, nb availability, sm *ScalingMatrices) error {
 	// 1. Get prediction block
-	top, left, topLeft, hasTop, hasLeft := getLuma16x16Neighbors(f, mbX, mbY)
+	top, left, topLeft, hasTop, hasLeft := getLuma16x16Neighbors(f, mbX, mbY, nb)
 	var topSlice, leftSlice []uint8
 	if hasTop {
 		topSlice = top[:]
@@ -658,7 +768,7 @@ func reconstructI16x16(sc *slice.SliceContext, f *frame.Frame,
 
 // reconstructI4x4 reconstructs an I_4x4 macroblock.
 func reconstructI4x4(sc *slice.SliceContext, f *frame.Frame,
-	mbIdx, mbX, mbY int, mb *slice.MBData, sm *ScalingMatrices) error {
+	mbIdx, mbX, mbY int, mb *slice.MBData, nb availability, sm *ScalingMatrices) error {
 	x0 := mbX * 16
 	y0 := mbY * 16
 	sl := &sm.IntraY4x4
@@ -668,12 +778,14 @@ func reconstructI4x4(sc *slice.SliceContext, f *frame.Frame,
 		by := inverseRasterY4x4[i]
 
 		// Get reference samples for this 4x4 block
-		ref := getLuma4x4Neighbors(f, x0+bx, y0+by, i, mbX, mbY, sc.MBWidth, sc.MBHeight)
+		av := lumaBlockAvail(bx, by, 4, nb)
+		if topRightNotAvail4x4[i] {
+			av.topRight = false
+		}
+		ref := getLuma4x4Neighbors(f, x0+bx, y0+by, av)
 
 		// Predict
-		leftAvail := x0+bx > 0
-		topAvail := y0+by > 0
-		predBlock := pred.Predict4x4(mb.Intra4x4PredMode[i], ref, leftAvail, topAvail)
+		predBlock := pred.Predict4x4(mb.Intra4x4PredMode[i], ref, av.left, av.top)
 
 		// Apply zigzag scan to convert from CABAC scan order to matrix order
 		var coeffs [16]int32
@@ -698,11 +810,9 @@ func reconstructI4x4(sc *slice.SliceContext, f *frame.Frame,
 
 // reconstructI8x8 reconstructs an I_8x8 macroblock.
 func reconstructI8x8(sc *slice.SliceContext, f *frame.Frame,
-	mbIdx, mbX, mbY int, mb *slice.MBData, sm *ScalingMatrices) error {
+	mbIdx, mbX, mbY int, mb *slice.MBData, nb availability, sm *ScalingMatrices) error {
 	x0 := mbX * 16
 	y0 := mbY * 16
-	frameW := sc.MBWidth * 16
-	frameH := sc.MBHeight * 16
 	sl := &sm.IntraY8x8
 
 	for i := range 4 {
@@ -710,12 +820,11 @@ func reconstructI8x8(sc *slice.SliceContext, f *frame.Frame,
 		by := (i / 2) * 8
 
 		// 1. Get filtered reference samples
-		ref := getLuma8x8Neighbors(f, x0+bx, y0+by, i, frameW, frameH)
+		av := lumaBlockAvail(bx, by, 8, nb)
+		ref := getLuma8x8Neighbors(f, x0+bx, y0+by, av)
 
 		// 2. Predict
-		leftAvail := x0+bx > 0
-		topAvail := y0+by > 0
-		predBlock := pred.Predict8x8(mb.Intra8x8PredMode[i], ref, leftAvail, topAvail)
+		predBlock := pred.Predict8x8(mb.Intra8x8PredMode[i], ref, av.left, av.top)
 
 		// 3. Scan order conversion → matrix raster order
 		var coeffs [64]int32
@@ -750,101 +859,90 @@ func reconstructI8x8(sc *slice.SliceContext, f *frame.Frame,
 
 // getLuma8x8Neighbors returns 25 filtered reference samples for 8x8 intra prediction.
 // Layout: [L7, L6, L5, L4, L3, L2, L1, L0, TL, T0..T7, T8..T15]
-// Handles availability, substitution (8.3.2.2.2), and filtering (8.3.2.2.3).
-func getLuma8x8Neighbors(f *frame.Frame, blkX, blkY int, i8x8 int, frameW, frameH int) [25]uint8 {
-	var ref [25]uint8
-	var avail [25]bool
+// av gives the availability of the samples of the block at (blkX, blkY).
+// Unavailable samples are left at 0: the prediction modes that the bitstream
+// may use for the block do not read them.
+func getLuma8x8Neighbors(f *frame.Frame, blkX, blkY int, av availability) [25]uint8 {
+	// p holds the unfiltered samples in the same layout.
+	var p [25]int
 
-	// Left: ref[0]=L7(bottom)..ref[7]=L0(top) = p[-1,7]..p[-1,0]
-	for i := range 8 {
-		px, py := blkX-1, blkY+7-i
-		if px >= 0 && py >= 0 && py < frameH {
-			ref[i] = f.GetLumaPixel(px, py)
-			avail[i] = true
+	// Left: p[0]=L7(bottom)..p[7]=L0(top) = p[-1,7]..p[-1,0]
+	if av.left {
+		for i := range 8 {
+			p[i] = int(f.GetLumaPixel(blkX-1, blkY+7-i))
 		}
 	}
 
-	// Top-left: ref[8] = p[-1,-1]
-	if blkX > 0 && blkY > 0 {
-		ref[8] = f.GetLumaPixel(blkX-1, blkY-1)
-		avail[8] = true
+	// Top-left: p[8] = p[-1,-1]
+	if av.topLeft {
+		p[8] = int(f.GetLumaPixel(blkX-1, blkY-1))
 	}
 
-	// Top: ref[9]=T0..ref[16]=T7 = p[0,-1]..p[7,-1]
-	for i := range 8 {
-		px, py := blkX+i, blkY-1
-		if py >= 0 && px >= 0 && px < frameW {
-			ref[9+i] = f.GetLumaPixel(px, py)
-			avail[9+i] = true
+	// Top: p[9]=T0..p[16]=T7 = p[0,-1]..p[7,-1], and top-right
+	// p[17]=T8..p[24]=T15 = p[8,-1]..p[15,-1]. Unavailable top-right samples
+	// are substituted by T7 (clause 8.3.2.2).
+	if av.top {
+		for i := range 8 {
+			p[9+i] = int(f.GetLumaPixel(blkX+i, blkY-1))
 		}
-	}
-
-	// Top-right: ref[17]=T8..ref[24]=T15 = p[8,-1]..p[15,-1]
-	// Not available for 8x8 block index 3 (bottom-right in MB)
-	topRightOK := i8x8 != 3
-	for i := range 8 {
-		px, py := blkX+8+i, blkY-1
-		if topRightOK && py >= 0 && px >= 0 && px < frameW {
-			ref[17+i] = f.GetLumaPixel(px, py)
-			avail[17+i] = true
-		}
-	}
-
-	// Substitution (section 8.3.2.2.2)
-	// Scan order: ref[0] (bottom-left) to ref[24] (top-right)
-	firstAvailIdx := -1
-	for i := range 25 {
-		if avail[i] {
-			firstAvailIdx = i
-			break
-		}
-	}
-	if firstAvailIdx == -1 {
-		// No available samples - use DC value
-		for i := range ref {
-			ref[i] = 128
-		}
-	} else {
-		// Fill all positions before firstAvailIdx with its value
-		for i := 0; i < firstAvailIdx; i++ {
-			ref[i] = ref[firstAvailIdx]
-		}
-		// Fill forward: unavailable positions get previous value
-		for i := firstAvailIdx + 1; i < 25; i++ {
-			if !avail[i] {
-				ref[i] = ref[i-1]
+		for i := range 8 {
+			if av.topRight {
+				p[17+i] = int(f.GetLumaPixel(blkX+8+i, blkY-1))
+			} else {
+				p[17+i] = p[16]
 			}
 		}
 	}
 
-	// Filtering (section 8.3.2.2.3) - 1-2-1 low-pass filter
-	return filterRefSamples8x8(ref)
-}
-
-// filterRefSamples8x8 applies the 1-2-1 low-pass filter to 8x8 reference samples.
-func filterRefSamples8x8(ref [25]uint8) [25]uint8 {
-	var f [25]uint8
-	// Bottom-left edge: p'[-1,7] = (p[-1,6] + 3*p[-1,7] + 2) >> 2
-	f[0] = uint8((int(ref[1]) + 3*int(ref[0]) + 2) >> 2)
-	// Interior samples (left column, TL, top row)
-	for i := 1; i < 24; i++ {
-		f[i] = uint8((int(ref[i-1]) + 2*int(ref[i]) + int(ref[i+1]) + 2) >> 2)
+	// Reference sample filtering (clause 8.3.2.2.1)
+	var ref [25]uint8
+	if av.top {
+		if av.topLeft {
+			ref[9] = uint8((p[8] + 2*p[9] + p[10] + 2) >> 2) // (8-78)
+		} else {
+			ref[9] = uint8((3*p[9] + p[10] + 2) >> 2) // (8-79)
+		}
+		for i := 10; i < 24; i++ {
+			ref[i] = uint8((p[i-1] + 2*p[i] + p[i+1] + 2) >> 2) // (8-80)
+		}
+		ref[24] = uint8((p[23] + 3*p[24] + 2) >> 2) // (8-81)
 	}
-	// Top-right edge: p'[15,-1] = (p[14,-1] + 3*p[15,-1] + 2) >> 2
-	f[24] = uint8((int(ref[23]) + 3*int(ref[24]) + 2) >> 2)
-	return f
+	if av.topLeft {
+		switch {
+		case av.top && av.left:
+			ref[8] = uint8((p[9] + 2*p[8] + p[7] + 2) >> 2) // (8-84)
+		case av.top:
+			ref[8] = uint8((3*p[8] + p[9] + 2) >> 2) // (8-82)
+		case av.left:
+			ref[8] = uint8((3*p[8] + p[7] + 2) >> 2) // (8-83)
+		default:
+			ref[8] = uint8(p[8])
+		}
+	}
+	if av.left {
+		if av.topLeft {
+			ref[7] = uint8((p[8] + 2*p[7] + p[6] + 2) >> 2) // (8-85)
+		} else {
+			ref[7] = uint8((3*p[7] + p[6] + 2) >> 2) // (8-86)
+		}
+		for i := 1; i < 7; i++ {
+			ref[i] = uint8((p[i+1] + 2*p[i] + p[i-1] + 2) >> 2) // (8-87)
+		}
+		ref[0] = uint8((p[1] + 3*p[0] + 2) >> 2) // (8-88)
+	}
+	return ref
 }
 
 // reconstructChroma reconstructs both chroma components for a macroblock.
 func reconstructChroma(sc *slice.SliceContext, f *frame.Frame,
-	mbIdx, mbX, mbY int, mb *slice.MBData, sm *ScalingMatrices) {
+	mbIdx, mbX, mbY int, mb *slice.MBData, nb availability, sm *ScalingMatrices) {
 	chromaSL := [2]*[16]int32{&sm.IntraCb4x4, &sm.IntraCr4x4}
 
 	for iCbCr := range 2 {
 		sl := chromaSL[iCbCr]
 
 		// Get chroma prediction
-		top, left, topLeft, hasTop, hasLeft := getChromaNeighbors(f, iCbCr, mbX, mbY)
+		top, left, topLeft, hasTop, hasLeft := getChromaNeighbors(f, iCbCr, mbX, mbY, nb)
 		var topSlice, leftSlice []uint8
 		if hasTop {
 			topSlice = top[:]
@@ -895,60 +993,58 @@ func reconstructChroma(sc *slice.SliceContext, f *frame.Frame,
 }
 
 // getLuma16x16Neighbors returns the reference samples for 16x16 luma prediction.
-func getLuma16x16Neighbors(f *frame.Frame, mbX, mbY int) (
+func getLuma16x16Neighbors(f *frame.Frame, mbX, mbY int, nb availability) (
 	top [16]uint8, left [16]uint8, topLeft uint8, hasTop, hasLeft bool) {
 	x0 := mbX * 16
 	y0 := mbY * 16
 
-	if mbY > 0 {
+	if nb.top {
 		hasTop = true
 		for x := range 16 {
 			top[x] = f.GetLumaPixel(x0+x, y0-1)
 		}
 	}
 
-	if mbX > 0 {
+	if nb.left {
 		hasLeft = true
 		for y := range 16 {
 			left[y] = f.GetLumaPixel(x0-1, y0+y)
 		}
 	}
 
-	if mbX > 0 && mbY > 0 {
+	if nb.topLeft {
 		topLeft = f.GetLumaPixel(x0-1, y0-1)
 	}
 
 	return
 }
 
-// getLuma4x4Neighbors returns the 13 reference samples for 4x4 prediction.
-// topRightNotAvail4x4 lists 4x4 block indices where the upper-right 4 samples
-// are never available (the containing block has a higher z-scan index or is in
-// the not-yet-decoded right MB).
+// topRightNotAvail4x4 lists the 4x4 block indices whose upper-right samples
+// are inside the macroblock but in a block decoded after this one.
 var topRightNotAvail4x4 = [16]bool{
 	false, false, false, true, // blocks 0-3: block 3's TR is in undecoded block 6
-	false, false, false, true, // blocks 4-7: block 7's TR is in right MB
+	false, false, false, false,
 	false, false, false, true, // blocks 8-11: block 11's TR is in undecoded block 12
-	false, false, false, true, // blocks 12-15: block 15's TR is in right MB
+	false, false, false, false,
 }
 
-func getLuma4x4Neighbors(f *frame.Frame, x0, y0 int, blkIdx int, mbX, mbY int, mbW, mbH int) [13]uint8 {
+// getLuma4x4Neighbors returns the 13 reference samples for 4x4 prediction of
+// the block at (x0, y0), whose samples have availability av.
+func getLuma4x4Neighbors(f *frame.Frame, x0, y0 int, av availability) [13]uint8 {
 	var ref [13]uint8
-	frameW := mbW * 16
-	frameH := mbH * 16
 	// ref[0..3] = L3,L2,L1,L0 (left column, bottom to top)
 	// ref[4]    = TL (top-left)
 	// ref[5..12]= T0..T7 (top row + upper-right)
 
 	for i := range 4 {
-		if x0 > 0 && y0+3-i >= 0 && y0+3-i < frameH {
+		if av.left {
 			ref[i] = f.GetLumaPixel(x0-1, y0+3-i)
 		} else {
 			ref[i] = 128
 		}
 	}
 
-	if x0 > 0 && y0 > 0 {
+	if av.topLeft {
 		ref[4] = f.GetLumaPixel(x0-1, y0-1)
 	} else {
 		ref[4] = 128
@@ -956,32 +1052,17 @@ func getLuma4x4Neighbors(f *frame.Frame, x0, y0 int, blkIdx int, mbX, mbY int, m
 
 	// Top samples T0..T3
 	for i := range 4 {
-		if y0 > 0 && x0+i >= 0 && x0+i < frameW {
+		if av.top {
 			ref[5+i] = f.GetLumaPixel(x0+i, y0-1)
 		} else {
 			ref[5+i] = 128
 		}
 	}
 
-	// Top-right samples T4..T7: check availability
-	trAvail := true
-	if topRightNotAvail4x4[blkIdx] {
-		trAvail = false
-	} else if blkIdx == 5 && mbX >= mbW-1 {
-		// Block 5 (12,0): TR is in MB above-right, not available at right edge
-		trAvail = false
-	} else if blkIdx == 13 {
-		// Block 13 (12,8): TR is in right MB (not decoded) — already handled by table
-		trAvail = false
-	}
-
-	if trAvail {
+	// Top-right samples T4..T7
+	if av.top && av.topRight {
 		for i := 4; i < 8; i++ {
-			if y0 > 0 && x0+i >= 0 && x0+i < frameW {
-				ref[5+i] = f.GetLumaPixel(x0+i, y0-1)
-			} else {
-				ref[5+i] = 128
-			}
+			ref[5+i] = f.GetLumaPixel(x0+i, y0-1)
 		}
 	} else {
 		// When upper-right is not available, fill T4..T7 with T3
@@ -994,26 +1075,26 @@ func getLuma4x4Neighbors(f *frame.Frame, x0, y0 int, blkIdx int, mbX, mbY int, m
 }
 
 // getChromaNeighbors returns reference samples for chroma prediction.
-func getChromaNeighbors(f *frame.Frame, comp int, mbX, mbY int) (
+func getChromaNeighbors(f *frame.Frame, comp int, mbX, mbY int, nb availability) (
 	top [8]uint8, left [8]uint8, topLeft uint8, hasTop, hasLeft bool) {
 	x0 := mbX * 8
 	y0 := mbY * 8
 
-	if mbY > 0 {
+	if nb.top {
 		hasTop = true
 		for x := range 8 {
 			top[x] = f.GetChromaPixel(comp, x0+x, y0-1)
 		}
 	}
 
-	if mbX > 0 {
+	if nb.left {
 		hasLeft = true
 		for y := range 8 {
 			left[y] = f.GetChromaPixel(comp, x0-1, y0+y)
 		}
 	}
 
-	if mbX > 0 && mbY > 0 {
+	if nb.topLeft {
 		topLeft = f.GetChromaPixel(comp, x0-1, y0-1)
 	}
 

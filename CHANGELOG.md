@@ -59,6 +59,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   plain `go build`; `internal/version.go` and the Makefile `-ldflags` are gone
 
 ### Fixed
+- Decoder (`DecodeNALUs`, `DecodeAllFrames`, `hi264dec`): IDR pictures carried by
+  several slices decode correctly; only the first slice was decoded, which under
+  CABAC gave wrong pixels with no error (#28). Missing slices are now an error.
 - `tools/gen_and_verify.sh` and `tools/update_golden.sh` account for hi264dec's
   `_WxH_yuv420p` YUV output suffix.
 - `AppendPSkipFrames` and `hi264-mp4-extend` continued from the last coded
