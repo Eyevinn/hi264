@@ -57,7 +57,8 @@ run_test() {
     local base="${OUTDIR}/${name}"
     local h264="${base}.264"
     local ref_yuv="${base}_ref.yuv"
-    local go_yuv="${base}_go.yuv"
+    # hi264dec appends _WxH_yuv420p to the .yuv name it is given
+    local go_yuv="${base}_go_${width}x${height}_yuv420p.yuv"
 
     printf "%-50s " "$name"
 
@@ -100,7 +101,7 @@ run_test() {
     fi
 
     # 3. Decode with hi264
-    if ! $H264DEC "$h264" "$go_yuv" >"${base}_godec.log" 2>&1; then
+    if ! $H264DEC "$h264" "${base}_go.yuv" >"${base}_godec.log" 2>&1; then
         echo "FAIL (hi264 error)"
         FAIL=$((FAIL + 1))
         ERRORS+=("$name: hi264 failed — see ${base}_godec.log")

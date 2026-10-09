@@ -59,6 +59,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   plain `go build`; `internal/version.go` and the Makefile `-ldflags` are gone
 
 ### Fixed
+- `tools/gen_and_verify.sh` and `tools/update_golden.sh` account for hi264dec's
+  `_WxH_yuv420p` YUV output suffix.
 - `AppendPSkipFrames` and `hi264-mp4-extend` continued from the last coded
   slice, which breaks on a source with B frames: frame_num advances only over
   reference pictures, and the picture order count must continue from the highest
