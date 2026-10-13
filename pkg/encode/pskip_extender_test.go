@@ -2,6 +2,7 @@ package encode
 
 import (
 	"bytes"
+	"encoding/binary"
 	"strings"
 	"testing"
 
@@ -383,6 +384,41 @@ func pSkipNALU(t *testing.T, sps *avc.SPS, pps *avc.PPS, frameNum, pocLsb uint32
 	return avc.ExtractNalusFromByteStream(annexB)[0]
 }
 
+// avccSample returns the NAL units as one sample with 4-byte length prefixes.
+func avccSample(nalus ...[]byte) []byte {
+	var sample []byte
+	for _, nalu := range nalus {
+		sample = binary.BigEndian.AppendUint32(sample, uint32(len(nalu)))
+		sample = append(sample, nalu...)
+	}
+	return sample
+}
+
+// TestPSkipExtenderObservesWithoutAllocating checks that observing slices, alone or in an AVCC
+// sample, makes no allocations.
+func TestPSkipExtenderObservesWithoutAllocating(t *testing.T) {
+	sps, pps := mustParseSPSPPS(t, buildSourceStream(t, false))
+	ext, err := NewPSkipExtender(sps, pps)
+	if err != nil {
+		t.Fatalf("NewPSkipExtender: %v", err)
+	}
+	slice := pSkipNALU(t, sps, pps, 5, 10)
+	sample := avccSample(slice, pSkipNALU(t, sps, pps, 6, 12))
+	for name, observe := range map[string]func() error{
+		"ObserveNALU":       func() error { return ext.ObserveNALU(slice) },
+		"ObserveAVCCSample": func() error { return ext.ObserveAVCCSample(sample) },
+	} {
+		allocs := testing.AllocsPerRun(10, func() {
+			if err := observe(); err != nil {
+				t.Fatalf("%s: %v", name, err)
+			}
+		})
+		if allocs != 0 {
+			t.Errorf("%s: %.0f allocations, want 0", name, allocs)
+		}
+	}
+}
+
 // TestPSkipExtenderJoinsMidStream covers a live pipeline that starts observing between IDRs: the
 // first slice it sees is a P slice, and the numbering continues from it.
 func TestPSkipExtenderJoinsMidStream(t *testing.T) {
@@ -439,6 +475,11 @@ func TestPSkipExtenderDamagedInput(t *testing.T) {
 		}, "parse slice header"},
 		{"bad AVCC length", func() error { return ext.ObserveAVCCSample([]byte{0, 0, 0, 9, 0x41}) },
 			"split access unit"},
+		{"AVCC sample shorter than a length prefix", func() error { return ext.ObserveAVCCSample([]byte{0, 0, 1}) },
+			"split access unit"},
+		{"good slice before a bad AVCC length", func() error {
+			return ext.ObserveAVCCSample(append(avccSample(pSkipNALU(t, sps, pps, 2, 4)), 0, 0, 0, 9, 0x41))
+		}, "split access unit"},
 		{"truncated slice in AVCC sample", func() error {
 			return ext.ObserveAVCCSample(append([]byte{0, 0, 0, byte(len(truncatedSlice))}, truncatedSlice...))
 		}, "parse slice header"},
