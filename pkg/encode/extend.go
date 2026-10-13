@@ -28,8 +28,8 @@ func LastFrameState(annexB []byte) (frameNum uint32, picOrderCntLsb uint32, err 
 	nalus := avc.ExtractNalusFromByteStream(annexB)
 	spsMap := make(map[uint32]*avc.SPS)
 	ppsMap := make(map[uint32]*avc.PPS)
-	var lastSPS *avc.SPS
 	var lastSlice *avc.SliceHeader
+	var lastSPS *avc.SPS // the SPS of lastSlice
 	for _, nalu := range nalus {
 		if len(nalu) == 0 {
 			continue
@@ -41,7 +41,6 @@ func LastFrameState(annexB []byte) (frameNum uint32, picOrderCntLsb uint32, err 
 				return 0, 0, fmt.Errorf("LastFrameState: parse SPS: %w", perr)
 			}
 			spsMap[uint32(s.ParameterID)] = s
-			lastSPS = s
 		case avc.NALU_PPS:
 			p, perr := avc.ParsePPSNALUnit(nalu, spsMap)
 			if perr != nil {
@@ -54,12 +53,13 @@ func LastFrameState(annexB []byte) (frameNum uint32, picOrderCntLsb uint32, err 
 				return 0, 0, fmt.Errorf("LastFrameState: parse slice header: %w", perr)
 			}
 			lastSlice = sh
+			lastSPS = spsMap[ppsMap[sh.PicParamID].SeqParameterSetID]
 		}
 	}
 	if lastSlice == nil {
 		return 0, 0, fmt.Errorf("LastFrameState: no coded slice found")
 	}
-	if lastSPS != nil && lastSPS.PicOrderCntType != 0 && lastSPS.PicOrderCntType != 2 {
+	if lastSPS.PicOrderCntType != 0 && lastSPS.PicOrderCntType != 2 {
 		return 0, 0, fmt.Errorf("LastFrameState: pic_order_cnt_type=%d not supported (only types 0 and 2)",
 			lastSPS.PicOrderCntType)
 	}
@@ -70,13 +70,13 @@ func LastFrameState(annexB []byte) (frameNum uint32, picOrderCntLsb uint32, err 
 
 // AppendPSkipFrames extends an existing Annex-B bitstream with `count` empty
 // P_Skip frames whose frame_num and pic_order_cnt_lsb continue the source's
-// last picture (stride 2 per appended frame). The source's SPS and PPS are
-// reused as-is, so each appended frame copies pixels from the source's last
-// reference picture.
+// last picture (stride 2 per appended frame). The SPS and PPS of the source's
+// last slice are reused as-is, so each appended frame copies pixels from the
+// source's last reference picture.
 //
 // Returns the concatenated stream (original bytes + appended slices).
-// Requires the source to contain at least one SPS, one PPS, and one slice,
-// and the SPS to use pic_order_cnt_type 0 or 2. Slices use disable_deblocking=0.
+// Requires the source to contain at least one slice, with its SPS and PPS,
+// and that SPS to use pic_order_cnt_type 0 or 2. Slices use disable_deblocking=0.
 //
 // The continuation follows the stream's reference structure: frame_num advances
 // over the last reference picture (a trailing non-reference picture does not
@@ -92,14 +92,9 @@ func AppendPSkipFrames(annexB []byte, count uint32) ([]byte, error) {
 	if count == 0 {
 		return annexB, nil
 	}
-	sps, pps, err := parseSPSPPS(annexB)
-	if err != nil {
-		return nil, err
-	}
-	ext, err := NewPSkipExtender(sps, pps)
-	if err != nil {
-		return nil, fmt.Errorf("AppendPSkipFrames: %w", err)
-	}
+	// The extender learns the parameter sets from the stream and generates with those of its last
+	// slice.
+	ext := &PSkipExtender{spsMap: make(map[uint32]*avc.SPS), ppsMap: make(map[uint32]*avc.PPS)}
 	if err := ext.ObserveAnnexB(annexB); err != nil {
 		return nil, fmt.Errorf("AppendPSkipFrames: %w", err)
 	}
@@ -113,38 +108,4 @@ func AppendPSkipFrames(annexB []byte, count uint32) ([]byte, error) {
 		out = append(out, pSkip...)
 	}
 	return out, nil
-}
-
-func parseSPSPPS(data []byte) (*avc.SPS, *avc.PPS, error) {
-	nalus := avc.ExtractNalusFromByteStream(data)
-	spsMap := make(map[uint32]*avc.SPS)
-	var sps *avc.SPS
-	var pps *avc.PPS
-	for _, nalu := range nalus {
-		if len(nalu) == 0 {
-			continue
-		}
-		switch avc.GetNaluType(nalu[0]) {
-		case avc.NALU_SPS:
-			s, perr := avc.ParseSPSNALUnit(nalu, true)
-			if perr != nil {
-				return nil, nil, fmt.Errorf("parse SPS: %w", perr)
-			}
-			sps = s
-			spsMap[uint32(s.ParameterID)] = s
-		case avc.NALU_PPS:
-			p, perr := avc.ParsePPSNALUnit(nalu, spsMap)
-			if perr != nil {
-				return nil, nil, fmt.Errorf("parse PPS: %w", perr)
-			}
-			pps = p
-		}
-	}
-	if sps == nil {
-		return nil, nil, fmt.Errorf("no SPS in stream")
-	}
-	if pps == nil {
-		return nil, nil, fmt.Errorf("no PPS in stream")
-	}
-	return sps, pps, nil
 }

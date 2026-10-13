@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `PSkipExtender.ParameterSets`: the SPS and PPS that generated slices use.
+
+### Changed
+- `NewPSkipExtender` rejects a PPS that refers to another SPS, and
+  `NewPSkipExtenderFromDecConfRec` a record whose parameter sets do not all parse.
+
+### Fixed
+- `PSkipExtender`, `AppendPSkipFrames`, `LastFrameState` and `hi264-mp4-extend` use the
+  SPS and PPS of the last slice; a stream with several could be continued with the wrong ones.
+
 ## [0.11.0] - 2026-10-09
 
 ### Added

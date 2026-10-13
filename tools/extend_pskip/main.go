@@ -103,7 +103,8 @@ func run(args []string, stdout io.Writer) error {
 	return nil
 }
 
-// parseSlices returns one entry per coded slice in an Annex-B stream, in decode order.
+// parseSlices returns one entry per coded slice in an Annex-B stream, in decode order, and the SPS
+// of the last one.
 func parseSlices(annexB []byte) ([]sliceInfo, *avc.SPS, error) {
 	spsMap := make(map[uint32]*avc.SPS)
 	ppsMap := make(map[uint32]*avc.PPS)
@@ -120,7 +121,6 @@ func parseSlices(annexB []byte) ([]sliceInfo, *avc.SPS, error) {
 				return nil, nil, fmt.Errorf("parse SPS: %w", err)
 			}
 			spsMap[s.ParameterID] = s
-			sps = s
 		case avc.NALU_PPS:
 			p, err := avc.ParsePPSNALUnit(nalu, spsMap)
 			if err != nil {
@@ -132,6 +132,7 @@ func parseSlices(annexB []byte) ([]sliceInfo, *avc.SPS, error) {
 			if err != nil {
 				return nil, nil, fmt.Errorf("parse slice header: %w", err)
 			}
+			sps = spsMap[ppsMap[sh.PicParamID].SeqParameterSetID]
 			out = append(out, sliceInfo{
 				isIDR:    avc.GetNaluType(nalu[0]) == avc.NALU_IDR,
 				isRef:    nalu[0]&0x60 != 0,
@@ -141,7 +142,7 @@ func parseSlices(annexB []byte) ([]sliceInfo, *avc.SPS, error) {
 		}
 	}
 	if sps == nil {
-		return nil, nil, fmt.Errorf("no SPS in stream")
+		return nil, nil, fmt.Errorf("no coded slice in stream")
 	}
 	return out, sps, nil
 }

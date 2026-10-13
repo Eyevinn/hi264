@@ -112,8 +112,6 @@ func extendSegment(initPath, inSegPath, outSegPath string, count uint32, blackID
 		}
 	}
 
-	width := int(sps.Width)
-	height := int(sps.Height)
 	var inputSamples []mp4.FullSample
 	for _, seg := range segParsed.Segments {
 		for _, frag := range seg.Fragments {
@@ -129,6 +127,11 @@ func extendSegment(initPath, inSegPath, outSegPath string, count uint32, blackID
 			inputSamples = append(inputSamples, samples...)
 		}
 	}
+	// The appended frames continue with the parameter sets of the last input slice, which need not
+	// be the first ones in the init segment.
+	sps, pps = ext.ParameterSets()
+	width := int(sps.Width)
+	height := int(sps.Height)
 
 	newSamples := make([]mp4.FullSample, 0, count)
 	nextDecodeTime := nextDecodeTimeAfter(segParsed)
@@ -273,14 +276,23 @@ func extractSPSPPS(init *mp4.InitSegment) (*avc.SPS, *avc.PPS, error) {
 			if len(e.AvcC.SPSnalus) == 0 || len(e.AvcC.PPSnalus) == 0 {
 				return nil, nil, fmt.Errorf("avcC has no SPS/PPS")
 			}
-			sps, err := avc.ParseSPSNALUnit(e.AvcC.SPSnalus[0], true)
-			if err != nil {
-				return nil, nil, fmt.Errorf("parse SPS: %w", err)
+			// The first PPS and the SPS it refers to, which need not be the first SPS.
+			spsMap := make(map[uint32]*avc.SPS, len(e.AvcC.SPSnalus))
+			for _, nalu := range e.AvcC.SPSnalus {
+				sps, err := avc.ParseSPSNALUnit(nalu, true)
+				if err != nil {
+					return nil, nil, fmt.Errorf("parse SPS: %w", err)
+				}
+				spsMap[sps.ParameterID] = sps
 			}
-			spsMap := map[uint32]*avc.SPS{uint32(sps.ParameterID): sps}
 			pps, err := avc.ParsePPSNALUnit(e.AvcC.PPSnalus[0], spsMap)
 			if err != nil {
-				return sps, nil, fmt.Errorf("parse PPS: %w", err)
+				return nil, nil, fmt.Errorf("parse PPS: %w", err)
+			}
+			sps, ok := spsMap[pps.SeqParameterSetID]
+			if !ok {
+				return nil, nil, fmt.Errorf("PPS %d refers to SPS %d, which avcC lacks",
+					pps.PicParameterSetID, pps.SeqParameterSetID)
 			}
 			return sps, pps, nil
 		}
