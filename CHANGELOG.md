@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - `NewPSkipExtender` rejects a PPS that refers to another SPS, and
   `NewPSkipExtenderFromDecConfRec` a record whose parameter sets do not all parse.
+- Requires mp4ff v0.60.0. `PSkipExtender.ObserveNALU` and `ObserveAVCCSample` track slices
+  without allocating.
 
 ### Fixed
 - `PSkipExtender`, `AppendPSkipFrames`, `LastFrameState` and `hi264-mp4-extend` use the

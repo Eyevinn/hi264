@@ -1,6 +1,7 @@
 package encode
 
 import (
+	"encoding/binary"
 	"fmt"
 	"maps"
 
@@ -40,6 +41,8 @@ type PSkipExtender struct {
 
 	spsMap map[uint32]*avc.SPS
 	ppsMap map[uint32]*avc.PPS
+
+	sh avc.SliceHeader // reused for every observed slice
 
 	have      bool
 	frameNum  uint32 // frame_num of the most recent reference picture
@@ -170,30 +173,49 @@ func (e *PSkipExtender) ObserveNALU(nalu []byte) error {
 		}
 		e.ppsMap[pps.PicParameterSetID] = pps
 	case avc.NALU_IDR, avc.NALU_NON_IDR:
-		sh, err := avc.ParseSliceHeader(nalu, e.spsMap, e.ppsMap)
-		if err != nil {
+		if err := avc.ParseSliceHeaderInto(&e.sh, nalu, e.spsMap, e.ppsMap); err != nil {
 			return fmt.Errorf("PSkipExtender: parse slice header: %w", err)
 		}
 		// Continue with the parameter sets this slice uses. A picture may use any PPS that refers
 		// to the sequence's SPS, and an IDR may switch to another SPS. The parse found both.
-		e.pps = e.ppsMap[sh.PicParamID]
-		e.sps = e.spsMap[e.pps.SeqParameterSetID]
-		e.observeSlice(sh, avc.GetNaluType(nalu[0]) == avc.NALU_IDR, nalu[0]&0x60 != 0)
+		e.pps = e.ppsMap[e.sh.PicParamID]
+		e.sps = e.spsMap[e.sh.SeqParamID]
+		e.observeSlice(&e.sh, avc.GetNaluType(nalu[0]) == avc.NALU_IDR, nalu[0]&0x60 != 0)
 	}
 	return nil
 }
 
 // ObserveAVCCSample tracks one access unit in AVCC form, with 4-byte length prefixes, as carried by
-// fragmented MP4 and by FLV or RTMP video messages.
+// fragmented MP4 and by FLV or RTMP video messages. A sample whose length prefixes run past its end
+// returns an error before any of its NAL units is observed.
 func (e *PSkipExtender) ObserveAVCCSample(sample []byte) error {
-	nalus, err := avc.GetNalusFromSample(sample)
-	if err != nil {
+	if err := checkAVCCLengths(sample); err != nil {
 		return fmt.Errorf("PSkipExtender: split access unit: %w", err)
 	}
-	for _, nalu := range nalus {
-		if err := e.ObserveNALU(nalu); err != nil {
+	for pos := 0; pos+4 < len(sample); {
+		n := int(binary.BigEndian.Uint32(sample[pos:]))
+		pos += 4
+		if err := e.ObserveNALU(sample[pos : pos+n]); err != nil {
 			return err
 		}
+		pos += n
+	}
+	return nil
+}
+
+// checkAVCCLengths checks that the 4-byte length prefixes of an AVCC sample stay within it. As in
+// avc.GetNalusFromSample, up to four bytes after the last NAL unit are ignored.
+func checkAVCCLengths(sample []byte) error {
+	if len(sample) < 4 {
+		return fmt.Errorf("%d bytes, shorter than a length prefix", len(sample))
+	}
+	for pos := 0; pos+4 < len(sample); {
+		n := uint64(binary.BigEndian.Uint32(sample[pos:]))
+		if uint64(pos+4)+n > uint64(len(sample)) {
+			return fmt.Errorf("NAL unit length %d at byte %d runs past the end of the %d-byte sample",
+				n, pos, len(sample))
+		}
+		pos += 4 + int(n)
 	}
 	return nil
 }
