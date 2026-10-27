@@ -320,6 +320,77 @@ func TestDecodeFragmentedMP4(t *testing.T) {
 	}
 }
 
+// A video track without stsd gives an error, not a panic.
+func TestDecodeMP4WithoutStsd(t *testing.T) {
+	for _, missing := range []string{"minf", "stbl", "stsd"} {
+		t.Run(missing, func(t *testing.T) {
+			dir := t.TempDir()
+			init := mp4.CreateEmptyInit()
+			init.AddEmptyTrack(25, "video", "und")
+			mdia := init.Moov.Trak.Mdia
+			switch missing {
+			case "minf":
+				mdia.Children = withoutBox(mdia.Children, "minf")
+			case "stbl":
+				mdia.Minf.Children = withoutBox(mdia.Minf.Children, "stbl")
+			case "stsd":
+				mdia.Minf.Stbl.Children = withoutBox(mdia.Minf.Stbl.Children, "stsd")
+			}
+			var buf bytes.Buffer
+			if err := init.Encode(&buf); err != nil {
+				t.Fatal(err)
+			}
+			input := filepath.Join(dir, "test.mp4")
+			if err := os.WriteFile(input, buf.Bytes(), 0644); err != nil {
+				t.Fatal(err)
+			}
+
+			err := run([]string{appName, input, filepath.Join(dir, "out.png")})
+			if err == nil || !strings.Contains(err.Error(), "stsd") {
+				t.Errorf("got error %v, want one about stsd", err)
+			}
+		})
+	}
+}
+
+// A fragmented MP4 whose video track lacks tkhd gives an error, not a panic.
+func TestDecodeFragmentedMP4WithoutTkhd(t *testing.T) {
+	dir := t.TempDir()
+	data, err := os.ReadFile(generateTestMP4(t, dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	mp4File, err := mp4.DecodeFile(bytes.NewReader(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	trak := mp4File.Moov.Trak
+	trak.Children = withoutBox(trak.Children, "tkhd")
+	var buf bytes.Buffer
+	if err := mp4File.Encode(&buf); err != nil {
+		t.Fatal(err)
+	}
+	input := filepath.Join(dir, "notkhd.mp4")
+	if err := os.WriteFile(input, buf.Bytes(), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	err = run([]string{appName, input, filepath.Join(dir, "out.png")})
+	if err == nil || !strings.Contains(err.Error(), "tkhd") {
+		t.Errorf("got error %v, want one about tkhd", err)
+	}
+}
+
+func withoutBox(children []mp4.Box, boxType string) []mp4.Box {
+	var kept []mp4.Box
+	for _, c := range children {
+		if c.Type() != boxType {
+			kept = append(kept, c)
+		}
+	}
+	return kept
+}
+
 func TestDecodeProgressiveMP4(t *testing.T) {
 	dir := t.TempDir()
 	output := filepath.Join(dir, "out.png")

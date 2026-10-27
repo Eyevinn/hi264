@@ -378,8 +378,8 @@ go run ./cmd/hi264-mp4-extend -frames 25 -black-idr init.mp4 seg1s.m4s seg2s.m4s
 cat init.mp4 seg2s.m4s | ffplay -i -
 ```
 
-Constraints: SPS `pic_order_cnt_type` 0 or 2 (type 1 unsupported); 8-bit
-4:2:0 progressive. Works with the foreign SPS/PPS the source provides —
+Constraints: an init segment with exactly one track, as in CMAF; SPS
+`pic_order_cnt_type` 0 or 2 (type 1 unsupported); 8-bit 4:2:0 progressive. Works with the foreign SPS/PPS the source provides —
 no reset of the parameter sets in the output.
 
 ## Image File Format

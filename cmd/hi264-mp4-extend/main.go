@@ -51,8 +51,9 @@ init segment, e.g.
 
     cat init.mp4 out.m4s | ffplay -i -
 
-Constraints: SPS pic_order_cnt_type must be 0 or 2 (type 1 unsupported);
-8-bit 4:2:0; progressive only.
+Constraints: the init segment has exactly one track, as in CMAF; SPS
+pic_order_cnt_type must be 0 or 2 (type 1 unsupported); 8-bit 4:2:0;
+progressive only.
 
 Usage:
   hi264-mp4-extend -frames N [-black-idr] <init.mp4> <in.m4s> <out.m4s>
@@ -83,7 +84,11 @@ func extendSegment(initPath, inSegPath, outSegPath string, count uint32, blackID
 	if initParsed.Init == nil {
 		return fmt.Errorf("init segment missing (no ftyp+moov)")
 	}
-	sps, pps, err := extractSPSPPS(initParsed.Init)
+	trak, err := onlyTrack(initParsed.Init)
+	if err != nil {
+		return fmt.Errorf("read init segment: %w", err)
+	}
+	sps, pps, err := extractSPSPPS(trak)
 	if err != nil {
 		return fmt.Errorf("read SPS/PPS from init: %w", err)
 	}
@@ -106,7 +111,7 @@ func extendSegment(initPath, inSegPath, outSegPath string, count uint32, blackID
 		return fmt.Errorf("prepare extension: %w", err)
 	}
 	// Every parameter set in the init segment, so that slices referencing any of them parse.
-	for _, nalu := range parameterSets(initParsed.Init) {
+	for _, nalu := range parameterSets(trak) {
 		if err := ext.ObserveNALU(nalu); err != nil {
 			return fmt.Errorf("inspect init segment: %w", err)
 		}
@@ -147,7 +152,7 @@ func extendSegment(initPath, inSegPath, outSegPath string, count uint32, blackID
 		fmt.Fprintln(os.Stderr, "note: source signals HRD parameters; "+
 			"pic_timing SEI omitted on appended frames (HRD timing not yet supported)")
 	}
-	timescale := mediaTimescale(initParsed.Init)
+	timescale := mediaTimescale(trak)
 
 	if blackIDR {
 		blackY := uint8(16)
@@ -221,7 +226,7 @@ func extendSegment(initPath, inSegPath, outSegPath string, count uint32, blackID
 		return fmt.Errorf("create %s: %w", outSegPath, err)
 	}
 	seqNum := firstSeqNum(segParsed)
-	frag, err := mp4.CreateFragment(seqNum, defaultTrackID(initParsed.Init))
+	frag, err := mp4.CreateFragment(seqNum, trak.Tkhd.TrackID)
 	if err != nil {
 		out.Close()
 		return fmt.Errorf("create fragment: %w", err)
@@ -262,60 +267,83 @@ func decodeFile(path string) (*mp4.File, error) {
 	return mp4.DecodeFile(bytes.NewReader(data))
 }
 
-func extractSPSPPS(init *mp4.InitSegment) (*avc.SPS, *avc.PPS, error) {
-	if init == nil || init.Moov == nil {
-		return nil, nil, fmt.Errorf("no moov in init segment")
+// onlyTrack returns the track of the init segment, which must have exactly one, as a CMAF header
+// has. The output fragment gets its track ID.
+func onlyTrack(init *mp4.InitSegment) (*mp4.TrakBox, error) {
+	if init.Moov == nil {
+		return nil, fmt.Errorf("no moov")
 	}
-	for _, trak := range init.Moov.Traks {
-		stsd := trak.Mdia.Minf.Stbl.Stsd
-		for _, child := range stsd.Children {
-			e, ok := child.(*mp4.VisualSampleEntryBox)
-			if !ok || e.AvcC == nil {
-				continue
-			}
-			if len(e.AvcC.SPSnalus) == 0 || len(e.AvcC.PPSnalus) == 0 {
-				return nil, nil, fmt.Errorf("avcC has no SPS/PPS")
-			}
-			// The first PPS and the SPS it refers to, which need not be the first SPS.
-			spsMap := make(map[uint32]*avc.SPS, len(e.AvcC.SPSnalus))
-			for _, nalu := range e.AvcC.SPSnalus {
-				sps, err := avc.ParseSPSNALUnit(nalu, true)
-				if err != nil {
-					return nil, nil, fmt.Errorf("parse SPS: %w", err)
-				}
-				spsMap[sps.ParameterID] = sps
-			}
-			pps, err := avc.ParsePPSNALUnit(e.AvcC.PPSnalus[0], spsMap)
-			if err != nil {
-				return nil, nil, fmt.Errorf("parse PPS: %w", err)
-			}
-			sps, ok := spsMap[pps.SeqParameterSetID]
-			if !ok {
-				return nil, nil, fmt.Errorf("PPS %d refers to SPS %d, which avcC lacks",
-					pps.PicParameterSetID, pps.SeqParameterSetID)
-			}
-			return sps, pps, nil
-		}
+	if n := len(init.Moov.Traks); n != 1 {
+		return nil, fmt.Errorf("%d tracks, want exactly 1", n)
 	}
-	return nil, nil, fmt.Errorf("no AVC video track found")
+	trak := init.Moov.Traks[0]
+	if trak.Tkhd == nil {
+		return nil, fmt.Errorf("track has no tkhd")
+	}
+	return trak, nil
 }
 
-// parameterSets returns the SPS and PPS NALUs of every AVC sample entry in the init segment, the
-// SPSs first, since a PPS refers to one.
-func parameterSets(init *mp4.InitSegment) [][]byte {
-	var sps, pps [][]byte
-	for _, trak := range init.Moov.Traks {
-		stsd := trak.Mdia.Minf.Stbl.Stsd
-		for _, child := range stsd.Children {
-			e, ok := child.(*mp4.VisualSampleEntryBox)
-			if !ok || e.AvcC == nil {
-				continue
-			}
-			sps = append(sps, e.AvcC.SPSnalus...)
-			pps = append(pps, e.AvcC.PPSnalus...)
+func extractSPSPPS(trak *mp4.TrakBox) (*avc.SPS, *avc.PPS, error) {
+	stsd := sampleDescription(trak)
+	if stsd == nil {
+		return nil, nil, fmt.Errorf("track has no stsd")
+	}
+	for _, child := range stsd.Children {
+		e, ok := child.(*mp4.VisualSampleEntryBox)
+		if !ok || e.AvcC == nil {
+			continue
 		}
+		if len(e.AvcC.SPSnalus) == 0 || len(e.AvcC.PPSnalus) == 0 {
+			return nil, nil, fmt.Errorf("avcC has no SPS/PPS")
+		}
+		// The first PPS and the SPS it refers to, which need not be the first SPS.
+		spsMap := make(map[uint32]*avc.SPS, len(e.AvcC.SPSnalus))
+		for _, nalu := range e.AvcC.SPSnalus {
+			sps, err := avc.ParseSPSNALUnit(nalu, true)
+			if err != nil {
+				return nil, nil, fmt.Errorf("parse SPS: %w", err)
+			}
+			spsMap[sps.ParameterID] = sps
+		}
+		pps, err := avc.ParsePPSNALUnit(e.AvcC.PPSnalus[0], spsMap)
+		if err != nil {
+			return nil, nil, fmt.Errorf("parse PPS: %w", err)
+		}
+		sps, ok := spsMap[pps.SeqParameterSetID]
+		if !ok {
+			return nil, nil, fmt.Errorf("PPS %d refers to SPS %d, which avcC lacks",
+				pps.PicParameterSetID, pps.SeqParameterSetID)
+		}
+		return sps, pps, nil
+	}
+	return nil, nil, fmt.Errorf("track has no AVC sample entry")
+}
+
+// parameterSets returns the SPS and PPS NALUs of every AVC sample entry of the track, the SPSs
+// first, since a PPS refers to one.
+func parameterSets(trak *mp4.TrakBox) [][]byte {
+	stsd := sampleDescription(trak)
+	if stsd == nil {
+		return nil
+	}
+	var sps, pps [][]byte
+	for _, child := range stsd.Children {
+		e, ok := child.(*mp4.VisualSampleEntryBox)
+		if !ok || e.AvcC == nil {
+			continue
+		}
+		sps = append(sps, e.AvcC.SPSnalus...)
+		pps = append(pps, e.AvcC.PPSnalus...)
 	}
 	return append(sps, pps...)
+}
+
+// sampleDescription returns the stsd box of a track, or nil when the track lacks it or a box above it.
+func sampleDescription(trak *mp4.TrakBox) *mp4.StsdBox {
+	if trak.Mdia == nil || trak.Mdia.Minf == nil || trak.Mdia.Minf.Stbl == nil {
+		return nil
+	}
+	return trak.Mdia.Minf.Stbl.Stsd
 }
 
 func lastSampleDuration(file *mp4.File) uint32 {
@@ -364,28 +392,13 @@ func firstSeqNum(file *mp4.File) uint32 {
 	return 1
 }
 
-func defaultTrackID(init *mp4.InitSegment) uint32 {
-	if init == nil || init.Moov == nil {
-		return 1
-	}
-	for _, t := range init.Moov.Traks {
-		return t.Tkhd.TrackID
-	}
-	return 1
-}
-
-// mediaTimescale returns the media (mdhd) timescale of the first track, in
-// units per second. Used to map sample decode times to wall-clock timecodes.
-func mediaTimescale(init *mp4.InitSegment) uint32 {
-	if init == nil || init.Moov == nil {
+// mediaTimescale returns the media (mdhd) timescale of the track, in units
+// per second. Used to map sample decode times to wall-clock timecodes.
+func mediaTimescale(trak *mp4.TrakBox) uint32 {
+	if trak.Mdia == nil || trak.Mdia.Mdhd == nil {
 		return 0
 	}
-	for _, t := range init.Moov.Traks {
-		if t.Mdia != nil && t.Mdia.Mdhd != nil {
-			return t.Mdia.Mdhd.Timescale
-		}
-	}
-	return 0
+	return trak.Mdia.Mdhd.Timescale
 }
 
 // prependPicTiming prepends a pic_timing SEI NALU to an Annex-B access unit. The

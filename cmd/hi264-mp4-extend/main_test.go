@@ -73,6 +73,58 @@ func TestRunNonexistentInit(t *testing.T) {
 	}
 }
 
+// An init segment whose track lacks tkhd or stsd gives an error, not a panic. Without mdia, minf
+// or stbl, mp4ff does not take it for an init segment.
+func TestExtendInitWithoutBox(t *testing.T) {
+	for _, missing := range []string{"tkhd", "stsd"} {
+		t.Run(missing, func(t *testing.T) {
+			silenceStdout(t)
+			dir := t.TempDir()
+			init := decodeForTest(t, testInit).Init
+			trak := init.Moov.Trak
+			switch missing {
+			case "tkhd":
+				trak.Children = withoutBox(trak.Children, "tkhd")
+			case "stsd":
+				stbl := trak.Mdia.Minf.Stbl
+				stbl.Children = withoutBox(stbl.Children, "stsd")
+			}
+			initPath := filepath.Join(dir, "init.mp4")
+			writeBox(t, initPath, func(f *os.File) error { return init.Encode(f) })
+
+			err := extendSegment(initPath, testSeg, filepath.Join(dir, "out.m4s"), 1, false)
+			if err == nil || !strings.Contains(err.Error(), "no "+missing) {
+				t.Errorf("got error %v, want one about no %s", err, missing)
+			}
+		})
+	}
+}
+
+// As a CMAF header, the init segment must have exactly one track.
+func TestExtendRejectsMultiTrackInit(t *testing.T) {
+	silenceStdout(t)
+	dir := t.TempDir()
+	init := decodeForTest(t, testInit).Init
+	init.AddEmptyTrack(48000, "audio", "und")
+	initPath := filepath.Join(dir, "init.mp4")
+	writeBox(t, initPath, func(f *os.File) error { return init.Encode(f) })
+
+	err := extendSegment(initPath, testSeg, filepath.Join(dir, "out.m4s"), 1, false)
+	if err == nil || !strings.Contains(err.Error(), "2 tracks") {
+		t.Errorf("got error %v, want one about 2 tracks", err)
+	}
+}
+
+func withoutBox(children []mp4.Box, boxType string) []mp4.Box {
+	var kept []mp4.Box
+	for _, c := range children {
+		if c.Type() != boxType {
+			kept = append(kept, c)
+		}
+	}
+	return kept
+}
+
 // TestExtendPSkip uses the testdata fragmented MP4 (1280×720, 25 frames,
 // POC type 2, weighted_pred=1, CABAC) and appends 25 P_Skip samples.
 // Verifies the output trun lists 50 samples and the frame data is preserved.

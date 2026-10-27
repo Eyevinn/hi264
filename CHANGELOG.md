@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Requires mp4ff v0.61.0.
+- `hi264-mp4-extend` requires an init segment with exactly one track, as in CMAF.
+
+### Fixed
+- `hi264dec` and `hi264-mp4-extend` give an error instead of panicking on an MP4 track
+  without `stsd` or `tkhd`.
+
 ## [0.12.0] - 2026-10-13
 
 ### Added

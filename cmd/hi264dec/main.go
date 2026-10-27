@@ -202,11 +202,15 @@ func decodeMP4(inputFile string, dec *decoder.Decoder, n int, idrAndSkip bool) (
 	}
 
 	// Extract SPS/PPS from AvcC
-	stbl := videoTrack.Mdia.Minf.Stbl
-	if stbl.Stsd.AvcX == nil {
+	minf := videoTrack.Mdia.Minf
+	if minf == nil || minf.Stbl == nil || minf.Stbl.Stsd == nil {
+		return nil, fmt.Errorf("no sample description (stsd) in video track")
+	}
+	stsd := minf.Stbl.Stsd
+	if stsd.AvcX == nil {
 		return nil, fmt.Errorf("no AVC sample entry found (not an H.264 track)")
 	}
-	avcC := stbl.Stsd.AvcX.AvcC
+	avcC := stsd.AvcX.AvcC
 	if avcC == nil {
 		return nil, fmt.Errorf("no avcC box found")
 	}
@@ -273,6 +277,9 @@ func extractFragmented(mp4File *mp4.File, f *os.File,
 	spsNALUs, ppsNALUs [][]byte, dec *decoder.Decoder, n int,
 	videoTrack *mp4.TrakBox, idrAndSkip bool) ([]*frame.Frame, error) {
 
+	if videoTrack.Tkhd == nil {
+		return nil, fmt.Errorf("no tkhd in video track")
+	}
 	trackID := videoTrack.Tkhd.TrackID
 	fmt.Printf("Fragmented MP4: %d segments, trackID=%d\n", len(mp4File.Segments), trackID)
 
