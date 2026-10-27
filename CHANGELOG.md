@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.1] - 2026-10-27
+
 ### Changed
 - Requires mp4ff v0.61.0.
 - `hi264-mp4-extend` requires an init segment with exactly one track, as in CMAF.
@@ -281,7 +283,8 @@ Typical use cases include:
 - 41+ golden decoder test cases with pixel-perfect FFmpeg match
 - 12+ encoder verification tests against FFmpeg decode
 
-[Unreleased]: https://github.com/Eyevinn/hi264/compare/v0.12.0...HEAD
+[Unreleased]: https://github.com/Eyevinn/hi264/compare/v0.12.1...HEAD
+[0.12.1]: https://github.com/Eyevinn/hi264/compare/v0.12.0...v0.12.1
 [0.12.0]: https://github.com/Eyevinn/hi264/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/Eyevinn/hi264/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/Eyevinn/hi264/compare/v0.9.0...v0.10.0
