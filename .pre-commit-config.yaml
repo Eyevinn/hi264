@@ -15,6 +15,11 @@ repos:
       - id: go-fmt
       - id: golangci-lint
       - id: go-unit-tests
+  # Settings in .codespellrc. Keep the rev equal to CODESPELL_VERSION in the Makefile.
+  - repo: https://github.com/codespell-project/codespell
+    rev: v2.4.3
+    hooks:
+      - id: codespell
   - repo: https://github.com/alessandrojcm/commitlint-pre-commit-hook
     rev: v9.27.0
     hooks:
