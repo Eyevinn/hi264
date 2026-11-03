@@ -34,12 +34,16 @@ pre-commit-install: venv/bin/pre-commit
 pre-commit: venv/bin/pre-commit
 	venv/bin/pre-commit run --all-files
 
+# Keep equal to the codespell rev in .pre-commit-config.yaml.
+CODESPELL_VERSION = 2.4.3
+
 venv/bin/pre-commit venv/bin/codespell:
 	python3 -m venv venv
-	venv/bin/pip install pre-commit codespell
+	venv/bin/pip install pre-commit codespell==$(CODESPELL_VERSION)
 
+# Skips and ignored words are in .codespellrc, which the pre-commit hook reads too.
 codespell: venv/bin/codespell
-	venv/bin/codespell -S venv,coverage.html,'*.y4m','*.264','*.mp4' -L ue,trun,truns
+	venv/bin/codespell
 
 clean:
 	rm -rf out/ coverage.out coverage.html coverage.txt venv/

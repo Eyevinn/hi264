@@ -1,0 +1,15 @@
+[codespell]
+# Read by both the pre-commit hook and `make codespell`, so the two cannot drift.
+# The skip entries include path globs such as */testdata/*, because pre-commit
+# passes file paths, which a bare directory name does not match. Hidden files
+# are checked, as pre-commit passes .github/ files too, so .git, .claude and
+# .venv are skipped explicitly, as is this file, which lists misspellings by
+# design. external/ and references/ hold local, untracked source and standards.
+check-hidden = true
+skip = ./.git,./.claude,./.venv,./venv,.codespellrc,./external,./references,./out,testdata,testdata/*,*/testdata/*,./coverage.*,go.sum,*.y4m,*.yuv,*.264,*.mp4,*.m4s
+# Words codespell mistakes for misspellings, all domain vocabulary or identifiers:
+#   ue           ue(v), the unsigned exponential-Golomb syntax element
+#   trun, truns  the MP4 track run box, and mp4ff's Truns field holding them
+#   nd           the %Nd frame-number format specifier of hi264gen -text
+#   totaly       the totalY luma sum in cmd/rawpsnr
+ignore-words-list = ue,trun,truns,nd,totaly
