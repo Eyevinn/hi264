@@ -125,32 +125,66 @@ func TestDecodeNALUsWithoutIDR(t *testing.T) {
 // Slices are decoded as runs of macroblocks in raster order, so a PPS with
 // slice groups (FMO) is rejected rather than decoded wrongly.
 func TestDecodeRejectsSliceGroups(t *testing.T) {
-	nalus := oneMBStream(t, 0, 0, 0)
-	w := encode.NewBitWriter()
-	w.WriteUE(0)      // pic_parameter_set_id
-	w.WriteUE(0)      // seq_parameter_set_id
-	w.WriteBit(0)     // entropy_coding_mode_flag
-	w.WriteBit(0)     // bottom_field_pic_order_in_frame_present_flag
-	w.WriteUE(1)      // num_slice_groups_minus1
-	w.WriteUE(0)      // slice_group_map_type: interleaved
-	w.WriteUE(0)      // run_length_minus1[0]
-	w.WriteUE(0)      // run_length_minus1[1]
-	w.WriteUE(0)      // num_ref_idx_l0_default_active_minus1
-	w.WriteUE(0)      // num_ref_idx_l1_default_active_minus1
-	w.WriteBit(0)     // weighted_pred_flag
-	w.WriteBits(0, 2) // weighted_bipred_idc
-	w.WriteSE(0)      // pic_init_qp_minus26
-	w.WriteSE(0)      // pic_init_qs_minus26
-	w.WriteSE(0)      // chroma_qp_index_offset
-	w.WriteBit(1)     // deblocking_filter_control_present_flag
-	w.WriteBit(0)     // constrained_intra_pred_flag
-	w.WriteBit(0)     // redundant_pic_cnt_present_flag
-	w.WriteBit(1)     // rbsp_stop_one_bit
-	nalus[1] = encode.BuildNALU(byte(avc.NALU_PPS), 3, w.Bytes())
+	cases := []struct {
+		name string
+		// writeMap writes slice_group_map_type and the elements that follow it.
+		writeMap func(w *encode.BitWriter)
+		// wantErr is a substring of the error, or "" for any error.
+		wantErr string
+	}{
+		{
+			name: "interleaved",
+			writeMap: func(w *encode.BitWriter) {
+				w.WriteUE(0) // slice_group_map_type: interleaved
+				w.WriteUE(0) // run_length_minus1[0]
+				w.WriteUE(0) // run_length_minus1[1]
+			},
+			wantErr: "slice groups",
+		},
+		{
+			// With mp4ff v0.61.0, the slice header parser added 1 to
+			// slice_group_change_rate_minus1 2^64-1, which wrapped to 0, and
+			// divided by it: a panic before the decoder saw the slice groups.
+			name: "box-out with overflowing change rate",
+			writeMap: func(w *encode.BitWriter) {
+				w.WriteUE(3)       // slice_group_map_type: box-out
+				w.WriteBit(0)      // slice_group_change_direction_flag
+				w.WriteBits(0, 32) // slice_group_change_rate_minus1: 64 leading zero bits,
+				w.WriteBits(0, 32)
+				w.WriteBit(1)      // the marker bit,
+				w.WriteBits(0, 32) // and 64 zero suffix bits: 2^64-1
+				w.WriteBits(0, 32)
+			},
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			nalus := oneMBStream(t, 0, 0, 0)
+			w := encode.NewBitWriter()
+			w.WriteUE(0)  // pic_parameter_set_id
+			w.WriteUE(0)  // seq_parameter_set_id
+			w.WriteBit(0) // entropy_coding_mode_flag
+			w.WriteBit(0) // bottom_field_pic_order_in_frame_present_flag
+			w.WriteUE(1)  // num_slice_groups_minus1
+			c.writeMap(w)
+			w.WriteUE(0)      // num_ref_idx_l0_default_active_minus1
+			w.WriteUE(0)      // num_ref_idx_l1_default_active_minus1
+			w.WriteBit(0)     // weighted_pred_flag
+			w.WriteBits(0, 2) // weighted_bipred_idc
+			w.WriteSE(0)      // pic_init_qp_minus26
+			w.WriteSE(0)      // pic_init_qs_minus26
+			w.WriteSE(0)      // chroma_qp_index_offset
+			w.WriteBit(1)     // deblocking_filter_control_present_flag
+			w.WriteBit(0)     // constrained_intra_pred_flag
+			w.WriteBit(0)     // redundant_pic_cnt_present_flag
+			w.WriteBit(1)     // rbsp_stop_one_bit
+			nalus[1] = encode.BuildNALU(byte(avc.NALU_PPS), 3, w.Bytes())
 
-	_, err := New().DecodeNALUs(nalus)
-	if err == nil || !strings.Contains(err.Error(), "slice groups") {
-		t.Fatalf("got error %v, want slice groups not supported", err)
+			_, err := decodeWithTimeout(t, nalus, "a PPS with slice groups")
+			if err == nil || !strings.Contains(err.Error(), c.wantErr) {
+				t.Fatalf("got error %v, want one containing %q", err, c.wantErr)
+			}
+		})
 	}
 }
 

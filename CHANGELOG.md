@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Requires mp4ff v0.62.0.
+
+### Fixed
+- The decoder, `PSkipExtender`, `LastFrameState`, `AppendPSkipFrames` and `hi264-mp4-extend`
+  give an error instead of panicking on a PPS whose `slice_group_change_rate_minus1` overflows.
+
 ## [0.12.1] - 2026-10-27
 
 ### Changed
