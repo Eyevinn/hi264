@@ -203,13 +203,14 @@ func (e *FrameEncoder) encodeSliceCAVLC(idrPicID uint32) ([]byte, error) {
 	reconCb := make([]uint8, (height/2)*strideC)
 	reconCr := make([]uint8, (height/2)*strideC)
 
+	var blockCache planeMBCache
 	for mbY := range mbHeight {
 		for mbX := range mbWidth {
 			lumaVals := pg.MBLumaValues(mbX, mbY)
 			cbVals, crVals := pg.MBChromaSub(mbX, mbY)
 
 			err := e.encodeMBPlane(sliceW, mbX, mbY, lumaVals, cbVals, crVals,
-				nCLuma, nCCb, nCCr, reconY, strideY, reconCb, reconCr, strideC)
+				nCLuma, nCCb, nCCr, reconY, strideY, reconCb, reconCr, strideC, &blockCache)
 			if err != nil {
 				return nil, fmt.Errorf("encode MB (%d,%d): %w", mbX, mbY, err)
 			}
