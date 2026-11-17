@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.3] - 2026-11-17
+
+### Changed
+- `FrameEncoder`, the `GenerateIDR*` functions and `hi264gen` encode IDR frames faster,
+  most of all with large flat areas. The output is unchanged.
+
 ## [0.12.2] - 2026-11-04
 
 ### Changed
@@ -292,7 +298,8 @@ Typical use cases include:
 - 41+ golden decoder test cases with pixel-perfect FFmpeg match
 - 12+ encoder verification tests against FFmpeg decode
 
-[Unreleased]: https://github.com/Eyevinn/hi264/compare/v0.12.2...HEAD
+[Unreleased]: https://github.com/Eyevinn/hi264/compare/v0.12.3...HEAD
+[0.12.3]: https://github.com/Eyevinn/hi264/compare/v0.12.2...v0.12.3
 [0.12.2]: https://github.com/Eyevinn/hi264/compare/v0.12.1...v0.12.2
 [0.12.1]: https://github.com/Eyevinn/hi264/compare/v0.12.0...v0.12.1
 [0.12.0]: https://github.com/Eyevinn/hi264/compare/v0.11.0...v0.12.0
