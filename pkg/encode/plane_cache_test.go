@@ -3,6 +3,9 @@ package encode
 import (
 	"bytes"
 	"testing"
+
+	"github.com/Eyevinn/hi264/internal/cabac"
+	"github.com/Eyevinn/hi264/internal/context"
 )
 
 func TestPlaneCacheMatchesFreshAnalysis(t *testing.T) {
@@ -42,9 +45,12 @@ func TestPlaneCacheMatchesFreshAnalysis(t *testing.T) {
 			values := [3][4]uint8{{128, 128, 128, 128}, {128, 128, 128, 128}, {128, 128, 128, 128}}
 			encoder := FrameEncoder{QP: 26}
 			var cache planeMBCache
-			for range 2 {
+			for range 3 {
 				cache.analyze(&encoder, 1, 1, values[0], values[1], values[2],
 					planes[0], 32, planes[1], planes[2], 16)
+			}
+			if cache.hits != 1 {
+				t.Fatalf("cache hits = %d, want 1", cache.hits)
 			}
 			// When source values, QP, neighbor pixels, or neighbor availability change.
 			encoder.QP = tt.qp
@@ -64,6 +70,32 @@ func TestPlaneCacheMatchesFreshAnalysis(t *testing.T) {
 				t.Fatal("cached analysis differs from fresh analysis")
 			}
 		})
+	}
+}
+
+func TestCABACPlaneCacheHit(t *testing.T) {
+	const mbWidth = 3
+	values := [4]uint8{128, 128, 128, 128}
+	encoder := FrameEncoder{QP: 26}
+	mbStates := make([]encMBState, mbWidth)
+	ctx := context.InitModels(encoder.QP, 2, 0)
+	cabacEncoder := cabac.NewEncoder()
+	reconY := make([]uint8, mbWidth*16*16)
+	reconCb := make([]uint8, mbWidth*8*8)
+	reconCr := make([]uint8, mbWidth*8*8)
+	strideY, strideC := mbWidth*16, mbWidth*8
+	var cache planeMBCache
+
+	for mbX := range mbWidth {
+		if err := encoder.encodeMBCABACPlane(cabacEncoder, ctx[:], mbStates,
+			mbX, mbX, 0, values, values, values, mbWidth, 1,
+			reconY, strideY, reconCb, reconCr, strideC, &cache); err != nil {
+			t.Fatalf("encode MB %d: %v", mbX, err)
+		}
+	}
+
+	if cache.hits != 1 {
+		t.Fatalf("CABAC cache hits = %d, want 1", cache.hits)
 	}
 }
 

@@ -11,21 +11,22 @@ type planeMBKey struct {
 	topCb, leftCb, topCr, leftCr [8]uint8
 }
 
-// planeMBCache holds one analysis while encoding a CAVLC slice (a sequence of
-// macroblocks). CABAC, the other supported entropy coding mode, does not use it.
+// planeMBCache holds one analysis while encoding a slice (a sequence of
+// macroblocks). It can be used with either CAVLC or CABAC.
 //
 // Repeated flat regions often have the same source values and prediction
 // neighbors. When those inputs and the quantization parameter (QP) match, the
 // encoder can reuse the analysis instead of predicting, transforming, and
 // reconstructing the block again. A new cache is created for each slice.
 //
-// The cache never stores encoded bytes: CAVLC must encode each block using the
-// current counts of nonzero coefficients in neighboring blocks.
+// The cache never stores encoded bytes: entropy coding depends on the current
+// macroblock's neighbors and coder state.
 type planeMBCache struct {
 	valid  bool
 	source planeMBSource
 	key    planeMBKey
 	result planeMBAnalysis
+	hits   uint64
 }
 
 type planeMBSource struct {
@@ -52,6 +53,8 @@ func (c *planeMBCache) analyze(e *FrameEncoder, mbX, mbY int, luma, cb, cr [4]ui
 		e.analyzeMBPlane(&c.result, mbX, mbY, luma, cb, cr,
 			reconY, strideY, reconCb, reconCr, strideC)
 		c.key, c.valid = key, true
+	} else {
+		c.hits++
 	}
 	return &c.result
 }

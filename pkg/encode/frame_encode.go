@@ -269,6 +269,7 @@ func (e *FrameEncoder) encodeSliceCABAC(idrPicID uint32) ([]byte, error) {
 	reconCb := make([]uint8, (height/2)*strideC)
 	reconCr := make([]uint8, (height/2)*strideC)
 
+	var blockCache planeMBCache
 	for mbY := range mbHeight {
 		for mbX := range mbWidth {
 			lumaVals := pg.MBLumaValues(mbX, mbY)
@@ -277,7 +278,7 @@ func (e *FrameEncoder) encodeSliceCABAC(idrPicID uint32) ([]byte, error) {
 			mbIdx := mbY*mbWidth + mbX
 			err := e.encodeMBCABACPlane(enc, ctx, mbStates, mbIdx, mbX, mbY,
 				lumaVals, cbVals, crVals,
-				mbWidth, mbHeight, reconY, strideY, reconCb, reconCr, strideC)
+				mbWidth, mbHeight, reconY, strideY, reconCb, reconCr, strideC, &blockCache)
 			if err != nil {
 				return nil, fmt.Errorf("encode MB (%d,%d): %w", mbX, mbY, err)
 			}

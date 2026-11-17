@@ -182,19 +182,17 @@ func reconstructLumaPixel(quantDC [16]int32, quantAC [16][15]int32,
 		var dqBlock [16]int32
 		dqBlock[0] = dequantMatrix[scan2raster[blk]]
 
-		if lumaCBP != 0 {
-			qpPer := qp / 6
-			qpRem := qp % 6
-			for i := 1; i < 16; i++ {
-				row := i / 4
-				col := i % 4
-				v := levelScaleIdx(row, col)
-				ls := levelScale4x4[qpRem][v] * 16
-				if qpPer >= 4 {
-					dqBlock[i] = quantAC[blk][i-1] * ls << uint(qpPer-4)
-				} else {
-					dqBlock[i] = (quantAC[blk][i-1]*ls + (1 << uint(3-qpPer))) >> uint(4-qpPer)
-				}
+		qpPer := qp / 6
+		qpRem := qp % 6
+		for i := 1; i < 16; i++ {
+			row := i / 4
+			col := i % 4
+			v := levelScaleIdx(row, col)
+			ls := levelScale4x4[qpRem][v] * 16
+			if qpPer >= 4 {
+				dqBlock[i] = quantAC[blk][i-1] * ls << uint(qpPer-4)
+			} else {
+				dqBlock[i] = (quantAC[blk][i-1]*ls + (1 << uint(3-qpPer))) >> uint(4-qpPer)
 			}
 		}
 
@@ -335,80 +333,12 @@ func (e *FrameEncoder) encodeMBCABACPlane(enc *cabac.Encoder, ctx []cabac.CtxSta
 	mbStates []encMBState, mbIdx, mbX, mbY int,
 	lumaVals [4]uint8, cbVals, crVals [4]uint8,
 	mbWidth, _ int,
-	reconY []uint8, strideY int, reconCb, reconCr []uint8, strideC int) error {
+	reconY []uint8, strideY int, reconCb, reconCr []uint8, strideC int,
+	cache *planeMBCache) error {
 
-	qp := e.QP
-	qpc := ChromaQP(qp)
-
-	// Select best luma prediction mode using per-pixel predictions
-	lumaMode, lumaPredArray := selectLumaModePlane(reconY, strideY, mbX, mbY, lumaVals)
-
-	// Compute per-4x4-block DC and AC coefficients using per-pixel residuals
-	var dcMatrix [16]int32
-	var acCoeffs [16][15]int32
-	lumaCBP := 0
-
-	for blk := range 16 {
-		bx := inverseRasterX4x4[blk]
-		by := inverseRasterY4x4[blk]
-		var res [16]int32
-		for r := range 4 {
-			for c := range 4 {
-				py, px := by+r, bx+c
-				qr, qc := py/8, px/8
-				val := lumaVals[qr*2+qc]
-				res[r*4+c] = int32(val) - int32(lumaPredArray[py*16+px])
-			}
-		}
-		fwd := ForwardTransform4x4(res)
-		dcMatrix[scan2raster[blk]] = fwd[0]
-		copy(acCoeffs[blk][:], fwd[1:])
-	}
-
-	hadamardResult := ForwardHadamard4x4(dcMatrix)
-	quantDC := QuantizeDC4x4(hadamardResult, qp, 16)
-
-	// Quantize AC coefficients and check if any are non-zero
-	var quantAC [16][15]int32
-	for blk := range 16 {
-		var fullBlock [16]int32
-		copy(fullBlock[1:], acCoeffs[blk][:])
-		qBlock := Quantize4x4(fullBlock, qp)
-		copy(quantAC[blk][:], qBlock[1:])
-		for _, v := range quantAC[blk] {
-			if v != 0 {
-				lumaCBP = 1
-				break
-			}
-		}
-	}
-
-	// Select best chroma prediction mode using per-pixel predictions
-	chromaMode, cbPredArray, crPredArray := selectChromaModePlane(reconCb, reconCr, strideC, mbX, mbY, cbVals, crVals)
-
-	// Chroma DC: per-sub-block residuals using exact sum
-	var cbDCMatrix [4]int32
-	var crDCMatrix [4]int32
-	for i := range 4 {
-		x0 := (i % 2) * 4
-		y0 := (i / 2) * 4
-		cbDCMatrix[i] = chromaSubBlockDC(cbVals[i], cbPredArray, x0, y0)
-		crDCMatrix[i] = chromaSubBlockDC(crVals[i], crPredArray, x0, y0)
-	}
-	cbHadamard := ForwardHadamard2x2(cbDCMatrix)
-	crHadamard := ForwardHadamard2x2(crDCMatrix)
-	quantCbDC := QuantizeChromaDC2x2(cbHadamard, qpc)
-	quantCrDC := QuantizeChromaDC2x2(crHadamard, qpc)
-
-	chromaCBP := 0
-	for i := range 4 {
-		if quantCbDC[i] != 0 || quantCrDC[i] != 0 {
-			chromaCBP = 1
-			break
-		}
-	}
-
-	mbType := 1 + lumaMode + 4*chromaCBP + 12*lumaCBP
+	analysis := cache.analyze(e, mbX, mbY, lumaVals, cbVals, crVals,
+		reconY, strideY, reconCb, reconCr, strideC)
+	mbType := 1 + analysis.lumaMode + 4*analysis.chromaCBP + 12*analysis.lumaCBP
 
 	// --- CABAC encoding of syntax elements ---
 
@@ -426,21 +356,21 @@ func (e *FrameEncoder) encodeMBCABACPlane(enc *cabac.Encoder, ctx []cabac.CtxSta
 
 	leftChromaNZ := leftState != nil && leftState.intraChromaPredMode != 0
 	topChromaNZ := topState != nil && topState.intraChromaPredMode != 0
-	encodeChromaPredMode(enc, ctx, chromaMode, leftChromaNZ, topChromaNZ)
+	encodeChromaPredMode(enc, ctx, analysis.chromaMode, leftChromaNZ, topChromaNZ)
 
 	encodeQPDelta(enc, ctx, 0, false)
 
 	// Residual: Intra16x16DCLevel — bitstream uses zig-zag scan order
 	dcCBFCtx := deriveDCCBFCtx(leftState, topState)
-	dcZZ := rasterToZigzag4x4(quantDC)
+	dcZZ := rasterToZigzag4x4(analysis.quantDC)
 	dcCBF := encodeResidualBlockCABAC(enc, ctx, encCtxBlockCatIntra16x16DC, dcCBFCtx, dcZZ[:], 16)
 	mbStates[mbIdx].codedBlockFlag[encCtxBlockCatIntra16x16DC][0] = dcCBF
 
 	// Intra16x16ACLevel — bitstream uses zig-zag scan order (skipping DC)
-	if lumaCBP != 0 {
+	if analysis.lumaCBP != 0 {
 		for blk := range 16 {
 			cbfCtx := deriveACCBFCtx(mbStates, mbIdx, mbX, mbY, mbWidth, blk)
-			acZZ := rasterACToZigzag(quantAC[blk])
+			acZZ := rasterACToZigzag(analysis.quantAC[blk])
 			cbf := encodeResidualBlockCABAC(enc, ctx, encCtxBlockCatIntra16x16AC, cbfCtx, acZZ[:], 15)
 			mbStates[mbIdx].codedBlockFlag[encCtxBlockCatIntra16x16AC][blk] = cbf
 		}
@@ -451,31 +381,33 @@ func (e *FrameEncoder) encodeMBCABACPlane(enc *cabac.Encoder, ctx []cabac.CtxSta
 	}
 
 	// Chroma DC
-	if chromaCBP > 0 {
+	if analysis.chromaCBP > 0 {
 		cbCBFCtx := deriveChromaDCCBFCtx(leftState, topState, 0)
-		cbCBF := encodeResidualBlockCABAC(enc, ctx, encCtxBlockCatChromaDC, cbCBFCtx, quantCbDC[:], 4)
+		cbCBF := encodeResidualBlockCABAC(enc, ctx, encCtxBlockCatChromaDC, cbCBFCtx, analysis.quantCbDC[:], 4)
 		mbStates[mbIdx].codedBlockFlag[encCtxBlockCatChromaDC][0] = cbCBF
 
 		crCBFCtx := deriveChromaDCCBFCtx(leftState, topState, 1)
-		crCBF := encodeResidualBlockCABAC(enc, ctx, encCtxBlockCatChromaDC, crCBFCtx, quantCrDC[:], 4)
+		crCBF := encodeResidualBlockCABAC(enc, ctx, encCtxBlockCatChromaDC, crCBFCtx, analysis.quantCrDC[:], 4)
 		mbStates[mbIdx].codedBlockFlag[encCtxBlockCatChromaDC][1] = crCBF
 	}
 
 	// Update MB state
 	mbStates[mbIdx].mbType = mbType
-	mbStates[mbIdx].intraChromaPredMode = chromaMode
-	mbStates[mbIdx].cbpChroma = chromaCBP
+	mbStates[mbIdx].intraChromaPredMode = analysis.chromaMode
+	mbStates[mbIdx].cbpChroma = analysis.chromaCBP
 
 	// Update reconstructed luma pixels (per-pixel prediction)
-	reconLuma := reconstructLumaPixel(quantDC, quantAC, lumaPredArray, qp, lumaCBP)
 	for y := range 16 {
 		off := (mbY*16+y)*strideY + mbX*16
-		copy(reconY[off:off+16], reconLuma[y*16:y*16+16])
+		copy(reconY[off:off+16], analysis.reconY[y*16:y*16+16])
 	}
 
 	// Update reconstructed chroma pixels (per-pixel prediction)
-	reconstructChromaPixel(quantCbDC, cbPredArray, qpc, reconCb, strideC, mbX, mbY)
-	reconstructChromaPixel(quantCrDC, crPredArray, qpc, reconCr, strideC, mbX, mbY)
+	for y := range 8 {
+		off := (mbY*8+y)*strideC + mbX*8
+		copy(reconCb[off:off+8], analysis.reconCb[y*8:y*8+8])
+		copy(reconCr[off:off+8], analysis.reconCr[y*8:y*8+8])
+	}
 
 	return nil
 }
